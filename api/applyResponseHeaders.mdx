@@ -1,0 +1,182 @@
+---
+title: applyResponseHeaders
+description: Apply AuthKit response headers to a Next.js response object with proper merging
+---
+
+The `applyResponseHeaders` function applies AuthKit response headers to a Next.js `NextResponse` object. This low-level utility is used when creating custom middleware responses with rewrites or advanced routing.
+
+<Note>
+  Most users should use [`handleAuthkitHeaders`](/api/handleAuthkitHeaders) instead, which handles both request and response headers automatically. Use `applyResponseHeaders` only for advanced use cases like rewrites.
+</Note>
+
+## Function signature
+
+```typescript
+function applyResponseHeaders(
+  response: NextResponse,
+  responseHeaders: Headers
+): NextResponse
+```
+
+## Parameters
+
+<ParamField path="response" type="NextResponse" required>
+  The Next.js response object to modify.
+</ParamField>
+
+<ParamField path="responseHeaders" type="Headers" required>
+  The response headers from `partitionAuthkitHeaders` containing only allowlisted headers safe for the browser.
+</ParamField>
+
+## Returns
+
+<ResponseField name="NextResponse" type="NextResponse">
+  The same response object with headers applied. The function mutates the response and returns it for convenience.
+</ResponseField>
+
+## Header merging behavior
+
+The function properly merges headers according to their type:
+
+- **Multi-value headers** (`Set-Cookie`, `Link`, etc.) - Appends values instead of replacing
+- **Vary header** - Merges unique values with comma separation
+- **Other headers** - Sets or replaces the value
+
+## Examples
+
+### Basic usage with rewrites
+
+```typescript
+// middleware.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { 
+  authkit, 
+  partitionAuthkitHeaders, 
+  applyResponseHeaders 
+} from '@workos-inc/authkit-nextjs';
+
+export default async function middleware(request: NextRequest) {
+  const { headers } = await authkit(request);
+  const { requestHeaders, responseHeaders } = partitionAuthkitHeaders(request, headers);
+
+  // Create a rewrite response
+  const response = NextResponse.rewrite(
+    new URL('/app/dashboard', request.url),
+    { request: { headers: requestHeaders } }
+  );
+
+  // Apply AuthKit response headers (cookies, cache-control, etc.)
+  return applyResponseHeaders(response, responseHeaders);
+}
+```
+
+### Dynamic routing with session data
+
+```typescript
+// middleware.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { 
+  authkit, 
+  partitionAuthkitHeaders, 
+  applyResponseHeaders 
+} from '@workos-inc/authkit-nextjs';
+
+export default async function middleware(request: NextRequest) {
+  const { session, headers } = await authkit(request);
+  const { requestHeaders, responseHeaders } = partitionAuthkitHeaders(request, headers);
+
+  // Route based on user role
+  let destination = '/app/dashboard';
+  if (session.user) {
+    const role = session.role;
+    if (role === 'admin') {
+      destination = '/app/admin';
+    } else if (role === 'member') {
+      destination = '/app/member';
+    }
+  }
+
+  const response = NextResponse.rewrite(
+    new URL(destination, request.url),
+    { request: { headers: requestHeaders } }
+  );
+
+  return applyResponseHeaders(response, responseHeaders);
+}
+```
+
+### Custom response with headers
+
+```typescript
+// middleware.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { 
+  authkit, 
+  partitionAuthkitHeaders, 
+  applyResponseHeaders 
+} from '@workos-inc/authkit-nextjs';
+
+export default async function middleware(request: NextRequest) {
+  const { session, headers } = await authkit(request);
+  const { responseHeaders } = partitionAuthkitHeaders(request, headers);
+
+  // Create a custom JSON response
+  const response = NextResponse.json(
+    { authenticated: !!session.user },
+    { status: 200 }
+  );
+
+  // Apply AuthKit headers to the JSON response
+  return applyResponseHeaders(response, responseHeaders);
+}
+```
+
+## Which headers are applied?
+
+The function applies only allowlisted response headers:
+
+| Header | Purpose |
+|--------|---------|
+| `Set-Cookie` | Session cookies (appended, not replaced) |
+| `Cache-Control` | Caching directives for authenticated responses |
+| `Vary` | Cache variation keys (merged) |
+| `WWW-Authenticate` | Authentication challenges |
+| `Proxy-Authenticate` | Proxy authentication |
+| `Link` | Pagination, preload hints (appended) |
+| `x-middleware-cache` | Next.js middleware caching control |
+
+<Warning>
+  Internal AuthKit headers (like `x-workos-session`) are filtered out by `partitionAuthkitHeaders` and never appear in response headers sent to the browser.
+</Warning>
+
+## When to use this function
+
+Use `applyResponseHeaders` when you need:
+
+<AccordionGroup>
+  <Accordion title="Rewrites">
+    Creating `NextResponse.rewrite()` responses that need AuthKit headers.
+  </Accordion>
+
+  <Accordion title="Custom responses">
+    Building JSON, image, or other custom responses that should include session cookies.
+  </Accordion>
+
+  <Accordion title="Manual header control">
+    Full control over response creation while still properly applying AuthKit headers.
+  </Accordion>
+</AccordionGroup>
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="handleAuthkitHeaders" icon="layer-group" href="/api/handleAuthkitHeaders">
+    High-level helper for most use cases
+  </Card>
+  <Card title="partitionAuthkitHeaders" icon="split" href="/api/partitionAuthkitHeaders">
+    Separate request and response headers
+  </Card>
+  <Card title="Composable middleware" icon="code-branch" href="/advanced/composable-middleware">
+    Complete middleware composition guide
+  </Card>
+</CardGroup>

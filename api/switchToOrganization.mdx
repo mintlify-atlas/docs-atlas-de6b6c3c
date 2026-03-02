@@ -1,0 +1,227 @@
+---
+title: switchToOrganization
+description: Switch the current session to a different organization with automatic revalidation and redirect
+---
+
+The `switchToOrganization` function allows users to switch their active session context to a different organization. This is useful for multi-tenant applications where users belong to multiple organizations.
+
+## Function signature
+
+```typescript
+function switchToOrganization(
+  organizationId: string,
+  options?: SwitchToOrganizationOptions
+): Promise<UserInfo>
+```
+
+## Parameters
+
+<ParamField path="organizationId" type="string" required>
+  The ID of the organization to switch to. The user must be authorized to access this organization.
+</ParamField>
+
+<ParamField path="options" type="SwitchToOrganizationOptions">
+  Optional configuration for the organization switch.
+  
+  <Expandable title="properties">
+    <ParamField path="returnTo" type="string">
+      URL to redirect to after switching organizations. Defaults to the current page.
+    </ParamField>
+    
+    <ParamField path="revalidationStrategy" type="'none' | 'tag' | 'path'" default="path">
+      How to revalidate Next.js cache after switching:
+      - `'path'` - Revalidate the current page path (default)
+      - `'tag'` - Revalidate specific cache tags
+      - `'none'` - Skip revalidation
+    </ParamField>
+    
+    <ParamField path="revalidationTags" type="string[]" default="[]">
+      Cache tags to revalidate when `revalidationStrategy` is `'tag'`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Returns
+
+<ResponseField name="UserInfo" type="Promise<UserInfo>">
+  Returns the updated user session information for the new organization context.
+  
+  <Expandable title="properties">
+    <ResponseField name="user" type="User">
+      The authenticated user object
+    </ResponseField>
+    <ResponseField name="sessionId" type="string">
+      Session identifier
+    </ResponseField>
+    <ResponseField name="organizationId" type="string">
+      The new organization ID
+    </ResponseField>
+    <ResponseField name="role" type="string">
+      User's role in the new organization
+    </ResponseField>
+    <ResponseField name="permissions" type="string[]">
+      User's permissions in the new organization
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Behavior
+
+When you call `switchToOrganization`:
+
+1. **Session refresh** - Refreshes the session with the new organization context
+2. **Authorization check** - Verifies the user has access to the target organization
+3. **Cache revalidation** - Invalidates Next.js cache according to the strategy
+4. **Automatic redirect** - Redirects to the specified page (unless strategy is `'none'`)
+
+<Warning>
+  If the user is not authorized for the target organization, or if SSO/MFA is required, the function will redirect to AuthKit for re-authentication.
+</Warning>
+
+## Examples
+
+### Basic organization switch
+
+```typescript
+'use server';
+
+import { switchToOrganization } from '@workos-inc/authkit-nextjs';
+
+export async function switchOrg(organizationId: string) {
+  // Switches org, revalidates current page, and redirects
+  await switchToOrganization(organizationId);
+}
+```
+
+### Switch with custom redirect
+
+```typescript
+'use server';
+
+import { switchToOrganization } from '@workos-inc/authkit-nextjs';
+
+export async function switchToOrgAndGoToDashboard(organizationId: string) {
+  await switchToOrganization(organizationId, {
+    returnTo: '/dashboard',
+  });
+}
+```
+
+### Switch with tag-based revalidation
+
+```typescript
+'use server';
+
+import { switchToOrganization } from '@workos-inc/authkit-nextjs';
+
+export async function switchOrgRevalidateTags(organizationId: string) {
+  await switchToOrganization(organizationId, {
+    revalidationStrategy: 'tag',
+    revalidationTags: ['user-data', 'org-settings', 'team-members'],
+  });
+}
+```
+
+### Switch without automatic redirect
+
+```typescript
+'use server';
+
+import { switchToOrganization } from '@workos-inc/authkit-nextjs';
+
+export async function switchOrgWithoutRedirect(organizationId: string) {
+  const userInfo = await switchToOrganization(organizationId, {
+    revalidationStrategy: 'none',
+  });
+  
+  // Handle the result manually
+  console.log(`Switched to org: ${userInfo.organizationId}`);
+  return userInfo;
+}
+```
+
+### Organization switcher component
+
+```typescript
+'use client';
+
+import { useTransition } from 'react';
+import { switchToOrgAction } from './actions';
+
+export function OrganizationSwitcher({ 
+  organizations 
+}: { 
+  organizations: Array<{ id: string; name: string }> 
+}) {
+  const [isPending, startTransition] = useTransition();
+
+  return (
+    <select
+      onChange={(e) => {
+        startTransition(async () => {
+          await switchToOrgAction(e.target.value);
+        });
+      }}
+      disabled={isPending}
+    >
+      {organizations.map((org) => (
+        <option key={org.id} value={org.id}>
+          {org.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+```
+
+```typescript
+// actions.ts
+'use server';
+
+import { switchToOrganization } from '@workos-inc/authkit-nextjs';
+
+export async function switchToOrgAction(organizationId: string) {
+  await switchToOrganization(organizationId);
+}
+```
+
+## Error handling
+
+The function may throw errors in several scenarios:
+
+<AccordionGroup>
+  <Accordion title="User not authorized">
+    If the user doesn't have access to the target organization, they'll be redirected to AuthKit for re-authentication.
+  </Accordion>
+
+  <Accordion title="SSO required">
+    If the organization requires SSO authentication, the user will be redirected to the SSO provider.
+  </Accordion>
+
+  <Accordion title="MFA enrollment required">
+    If MFA is required but not enrolled, the user will be redirected to complete MFA setup.
+  </Accordion>
+</AccordionGroup>
+
+## Use cases
+
+<CardGroup cols={2}>
+  <Card title="Multi-tenant applications" icon="building">
+    Allow users to switch between different company workspaces or teams
+  </Card>
+  <Card title="Role-based access" icon="user-shield">
+    Update user permissions when switching to organizations with different roles
+  </Card>
+  <Card title="Data isolation" icon="lock">
+    Ensure users only see data from their active organization context
+  </Card>
+  <Card title="Billing contexts" icon="credit-card">
+    Switch between organizations with different billing plans or limits
+  </Card>
+</CardGroup>
+
+## Related resources
+
+- [Session refresh guide](/guides/session-refresh) - Managing session state
+- [refreshSession](/api/refreshSession) - Manual session refresh without org switch
+- [useAuth hook](/api/useAuth) - Access organization context in client components

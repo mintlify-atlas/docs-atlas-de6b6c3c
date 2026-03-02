@@ -81,6 +81,7 @@
               "api/getSignInUrl",
               "api/getSignUpUrl",
               "api/signOut",
+              "api/switchToOrganization",
               "api/refreshSession",
               "api/saveSession",
               "api/getTokenClaims",
@@ -94,7 +95,8 @@
               "api/authkitMiddleware",
               "api/authkit",
               "api/handleAuthkitHeaders",
-              "api/partitionAuthkitHeaders"
+              "api/partitionAuthkitHeaders",
+              "api/applyResponseHeaders"
             ]
           },
           {
