@@ -1,0 +1,145 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "AuthKit Next.js",
+  "projectDescription": "Authentication and session management library for Next.js applications using WorkOS & AuthKit",
+  "theme": "mint",
+  "primaryColor": "#6363f1",
+  "lightColor": "#8b5cf6",
+  "darkColor": "#6363f1",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core-concepts/authentication-flow",
+              "core-concepts/session-management",
+              "core-concepts/middleware"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/server-components",
+              "guides/client-components",
+              "guides/protecting-routes",
+              "guides/session-refresh",
+              "guides/impersonation",
+              "guides/custom-state",
+              "guides/cdn-deployments"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/composable-middleware",
+              "advanced/eager-auth",
+              "advanced/custom-flows",
+              "advanced/workos-client"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/cookie-settings",
+              "configuration/middleware-options"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Server Functions",
+            "pages": [
+              "api/withAuth",
+              "api/handleAuth",
+              "api/getSignInUrl",
+              "api/getSignUpUrl",
+              "api/signOut",
+              "api/refreshSession",
+              "api/saveSession",
+              "api/getTokenClaims",
+              "api/validateApiKey",
+              "api/getWorkOS"
+            ]
+          },
+          {
+            "group": "Middleware",
+            "pages": [
+              "api/authkitMiddleware",
+              "api/authkit",
+              "api/handleAuthkitHeaders",
+              "api/partitionAuthkitHeaders"
+            ]
+          },
+          {
+            "group": "React Components",
+            "pages": [
+              "api/AuthKitProvider",
+              "api/Impersonation"
+            ]
+          },
+          {
+            "group": "React Hooks",
+            "pages": [
+              "api/useAuth",
+              "api/useAccessToken",
+              "api/useTokenClaims"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types/UserInfo",
+              "api/types/Session",
+              "api/types/HandleAuthOptions",
+              "api/types/AuthkitMiddlewareOptions"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Next.js App Router integration with middleware/proxy support",
+    "Server and client-side authentication helpers",
+    "Automatic session management with token refresh",
+    "React hooks and components for auth state",
+    "User impersonation support",
+    "API key validation",
+    "Custom OAuth state handling",
+    "CDN-safe caching headers"
+  ],
+  "publicApiSurface": [
+    "withAuth",
+    "handleAuth",
+    "getSignInUrl",
+    "getSignUpUrl",
+    "signOut",
+    "refreshSession",
+    "saveSession",
+    "authkitMiddleware",
+    "authkit",
+    "handleAuthkitHeaders",
+    "validateApiKey",
+    "getWorkOS",
+    "AuthKitProvider",
+    "useAuth",
+    "useAccessToken",
+    "useTokenClaims",
+    "Impersonation"
+  ]
+}
