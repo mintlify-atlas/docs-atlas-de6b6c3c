@@ -1,0 +1,336 @@
+---
+title: Protecting routes
+description: Learn different strategies for protecting routes and requiring authentication in your Next.js application
+---
+
+AuthKit provides multiple approaches to protect routes and require authentication. Choose the strategy that best fits your application architecture.
+
+## Middleware-based protection
+
+Use `middlewareAuth` to protect routes at the middleware level. This approach is "secure by default" and requires authentication for all matched routes unless explicitly allowed.
+
+<Steps>
+
+### Enable middleware auth
+
+Configure `middlewareAuth` in your middleware file:
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/', '/about', '/pricing'],
+  },
+});
+
+export const config = { 
+  matcher: ['/', '/dashboard/:path*', '/about', '/pricing'] 
+};
+```
+
+### Define public routes
+
+List all routes that should be accessible without authentication in `unauthenticatedPaths`:
+
+```ts
+export default authkitMiddleware({
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: [
+      '/',
+      '/about',
+      '/pricing',
+      '/blog/:path*',
+      '/docs/:path*',
+    ],
+  },
+});
+```
+
+<Note>
+The `unauthenticatedPaths` array uses the same glob pattern matching as Next.js middleware matchers. Use `:path*` for wildcard matching.
+</Note>
+
+### Access protected routes
+
+All routes not listed in `unauthenticatedPaths` will automatically require authentication:
+
+```tsx
+// app/dashboard/page.tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function DashboardPage() {
+  // User is guaranteed to be authenticated
+  const { user } = await withAuth();
+
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>Welcome, {user?.firstName}!</p>
+    </div>
+  );
+}
+```
+
+</Steps>
+
+## Component-level protection
+
+For more granular control, require authentication at the component level using `withAuth` or `useAuth`.
+
+### Server components
+
+Use `withAuth` with the `ensureSignedIn` option:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function ProtectedPage() {
+  // Redirects to AuthKit if not authenticated
+  const { user } = await withAuth({ ensureSignedIn: true });
+
+  return (
+    <div>
+      <h1>Protected Content</h1>
+      <p>Hello, {user.firstName}!</p>
+    </div>
+  );
+}
+```
+
+### Client components
+
+Use `useAuth` with the `ensureSignedIn` option:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function ProtectedComponent() {
+  const { user, loading } = useAuth({ ensureSignedIn: true });
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  return (
+    <div>
+      <h2>Protected Content</h2>
+      <p>Welcome, {user.firstName}!</p>
+    </div>
+  );
+}
+```
+
+## Protecting API routes
+
+Protect API route handlers by checking for authentication:
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export async function GET(request: NextRequest) {
+  const { user } = await withAuth();
+
+  if (!user) {
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
+
+  // Handle authenticated request
+  return NextResponse.json({ data: 'Protected data' });
+}
+```
+
+## Permission-based access control
+
+Protect routes based on user permissions or roles:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+import { redirect } from 'next/navigation';
+
+export default async function AdminPage() {
+  const { user, permissions } = await withAuth({ ensureSignedIn: true });
+
+  if (!permissions?.includes('admin')) {
+    redirect('/unauthorized');
+  }
+
+  return (
+    <div>
+      <h1>Admin Panel</h1>
+      <p>Welcome, {user.firstName}!</p>
+    </div>
+  );
+}
+```
+
+For role-based access:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+import { redirect } from 'next/navigation';
+
+export default async function ManagerPage() {
+  const { user, role } = await withAuth({ ensureSignedIn: true });
+
+  const allowedRoles = ['manager', 'admin', 'owner'];
+  
+  if (!role || !allowedRoles.includes(role)) {
+    redirect('/unauthorized');
+  }
+
+  return (
+    <div>
+      <h1>Manager Dashboard</h1>
+      <p>Role: {role}</p>
+    </div>
+  );
+}
+```
+
+## Organization-based access
+
+Restrict access based on organization membership:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+import { redirect } from 'next/navigation';
+
+export default async function OrganizationPage({ 
+  params 
+}: { 
+  params: { orgId: string } 
+}) {
+  const { user, organizationId } = await withAuth({ ensureSignedIn: true });
+
+  // Verify user has access to this organization
+  if (organizationId !== params.orgId) {
+    redirect('/unauthorized');
+  }
+
+  return (
+    <div>
+      <h1>Organization Dashboard</h1>
+      <p>Organization: {organizationId}</p>
+    </div>
+  );
+}
+```
+
+## Mixed authentication patterns
+
+Combine public and protected content on the same page:
+
+```tsx
+import Link from 'next/link';
+import { withAuth, getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function HomePage() {
+  const { user } = await withAuth();
+  const signInUrl = await getSignInUrl();
+
+  return (
+    <div>
+      <h1>Welcome to our app</h1>
+      <p>This content is visible to everyone</p>
+
+      {user ? (
+        <div className="authenticated">
+          <h2>Your personalized content</h2>
+          <p>Hello, {user.firstName}!</p>
+          <Link href="/dashboard">Go to Dashboard</Link>
+        </div>
+      ) : (
+        <div className="unauthenticated">
+          <h2>Sign in to see more</h2>
+          <Link href={signInUrl}>Sign in</Link>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## Protecting static routes
+
+For static routes that require authentication, configure the middleware matcher:
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/', '/public/:path*'],
+  },
+});
+
+export const config = {
+  matcher: [
+    '/',
+    '/dashboard/:path*',
+    '/settings/:path*',
+    '/public/:path*',
+  ],
+};
+```
+
+<Warning>
+Using a catch-all matcher pattern like `'/(.*)'` can intercept static assets (CSS, images, fonts), causing styles to break. Always use specific paths or exclude Next.js static paths:
+
+```ts
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+};
+```
+</Warning>
+
+## Sign-up specific routes
+
+Direct users to the sign-up screen for specific routes:
+
+```ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  signUpPaths: ['/register', '/onboarding'],
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/'],
+  },
+});
+
+export const config = { 
+  matcher: ['/', '/register', '/onboarding', '/dashboard/:path*'] 
+};
+```
+
+When users access `/register` or `/onboarding` without authentication, they'll be redirected to AuthKit with the sign-up screen hint.
+
+## Best practices
+
+<Tip>
+**Choose the right strategy for your needs:**
+
+- Use middleware auth for applications where most routes require authentication
+- Use component-level protection for mixed public/private content
+- Combine both approaches for maximum flexibility
+</Tip>
+
+<Warning>
+Always ensure your middleware configuration's `matcher` includes all routes where you call `withAuth`. Otherwise, you'll receive an error.
+</Warning>
+
+<Note>
+The redirect URI configured in your WorkOS dashboard should always be included in `unauthenticatedPaths` when using middleware auth. AuthKit automatically handles this for you.
+</Note>

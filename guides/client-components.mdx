@@ -1,0 +1,327 @@
+---
+title: Using AuthKit in client components
+description: Learn how to access authentication state and manage user sessions in React client components with the useAuth hook
+---
+
+Client components can access authentication state using the `useAuth` hook. This hook provides real-time access to the current user and methods to manage the session.
+
+## Setup
+
+Wrap your application with `AuthKitProvider` in your root layout:
+
+```tsx
+import { AuthKitProvider } from '@workos-inc/authkit-nextjs/components';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <AuthKitProvider>{children}</AuthKitProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+## Basic usage
+
+Use the `useAuth` hook in any client component to access the current user:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function ProfileComponent() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  if (!user) {
+    return <div>Not signed in</div>;
+  }
+
+  return (
+    <div>
+      <h2>Profile</h2>
+      <p>Name: {user.firstName} {user.lastName}</p>
+      <p>Email: {user.email}</p>
+    </div>
+  );
+}
+```
+
+## Available properties and methods
+
+The `useAuth` hook returns:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `user` | `User \| null` | The authenticated user object |
+| `sessionId` | `string` | Current session identifier |
+| `organizationId` | `string` | Organization context |
+| `role` | `string` | User's role |
+| `roles` | `string[]` | Array of user roles |
+| `permissions` | `string[]` | User's permissions |
+| `entitlements` | `string[]` | Active entitlements |
+| `featureFlags` | `string[]` | Enabled feature flags |
+| `impersonator` | `Impersonator` | Present when impersonating |
+| `loading` | `boolean` | True while fetching auth state |
+| `getAuth` | `function` | Manually refresh auth state |
+| `refreshAuth` | `function` | Refresh session and switch orgs |
+| `signOut` | `function` | Sign out the current user |
+| `switchToOrganization` | `function` | Switch active organization |
+
+## Requiring authentication
+
+Use the `ensureSignedIn` option to automatically redirect users who aren't authenticated:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function ProtectedComponent() {
+  // Automatically redirects if user is not signed in
+  const { user, loading } = useAuth({ ensureSignedIn: true });
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  // User is guaranteed to be defined here after loading
+  return (
+    <div>
+      <h2>Protected Content</h2>
+      <p>Welcome, {user.firstName}!</p>
+    </div>
+  );
+}
+```
+
+## Signing out users
+
+Use the `signOut` method to log out the current user:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function SignOutButton() {
+  const { signOut } = useAuth();
+
+  return (
+    <button onClick={() => signOut()}>
+      Sign out
+    </button>
+  );
+}
+```
+
+Optionally specify a return URL:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function SignOutButton() {
+  const { signOut } = useAuth();
+
+  return (
+    <button onClick={() => signOut({ returnTo: '/goodbye' })}>
+      Sign out
+    </button>
+  );
+}
+```
+
+## Optimizing with server-side auth data
+
+To avoid an extra client-side fetch on mount, pass initial auth data from the server:
+
+```tsx
+import { AuthKitProvider } from '@workos-inc/authkit-nextjs/components';
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Fetch auth data on the server
+  const auth = await withAuth();
+
+  // Remove the accessToken (not needed on client)
+  const { accessToken, ...initialAuth } = auth;
+
+  return (
+    <html lang="en">
+      <body>
+        <AuthKitProvider initialAuth={initialAuth}>
+          {children}
+        </AuthKitProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+<Tip>
+Passing `initialAuth` eliminates the loading state on initial page load, providing a better user experience.
+</Tip>
+
+## Handling loading states
+
+Always check the `loading` state before rendering user-dependent content:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function UserMenu() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="skeleton">
+        <div className="skeleton-avatar" />
+        <div className="skeleton-text" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <a href="/login">Sign in</a>;
+  }
+
+  return (
+    <div className="user-menu">
+      <img src={user.profilePictureUrl} alt={user.firstName} />
+      <span>{user.firstName}</span>
+    </div>
+  );
+}
+```
+
+## Manually refreshing auth state
+
+Use `getAuth` to manually refresh the authentication state:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function RefreshButton() {
+  const { getAuth } = useAuth();
+
+  return (
+    <button onClick={() => getAuth()}>
+      Refresh session
+    </button>
+  );
+}
+```
+
+## Customizing session expiration handling
+
+By default, the provider reloads the page when a session expires. Customize this behavior:
+
+```tsx
+import { AuthKitProvider } from '@workos-inc/authkit-nextjs/components';
+import { useRouter } from 'next/navigation';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <AuthKitProvider
+          onSessionExpired={() => {
+            // Custom handling (e.g., show a modal)
+            alert('Your session has expired. Please sign in again.');
+            window.location.href = '/login';
+          }}
+        >
+          {children}
+        </AuthKitProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+To disable automatic session expiration checks:
+
+```tsx
+<AuthKitProvider onSessionExpired={false}>
+  {children}
+</AuthKitProvider>
+```
+
+## Conditional rendering
+
+Create different UI based on authentication state:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+import Link from 'next/link';
+
+export default function Navigation() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <nav>Loading...</nav>;
+  }
+
+  return (
+    <nav>
+      <Link href="/">Home</Link>
+      {user ? (
+        <>
+          <Link href="/dashboard">Dashboard</Link>
+          <Link href="/profile">Profile</Link>
+        </>
+      ) : (
+        <>
+          <Link href="/login">Sign in</Link>
+          <Link href="/signup">Sign up</Link>
+        </>
+      )}
+    </nav>
+  );
+}
+```
+
+## Working with organizations
+
+Access organization context and user roles:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function OrganizationInfo() {
+  const { user, organizationId, role, permissions } = useAuth();
+
+  if (!user) {
+    return null;
+  }
+
+  return (
+    <div>
+      <h3>Organization Context</h3>
+      <p>Organization ID: {organizationId}</p>
+      <p>Your role: {role}</p>
+      <p>Permissions: {permissions?.join(', ')}</p>
+    </div>
+  );
+}
+```
+
+<Note>
+The `useAuth` hook automatically syncs with server-side session changes, including organization switches and permission updates.
+</Note>

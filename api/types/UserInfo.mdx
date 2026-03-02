@@ -1,0 +1,116 @@
+---
+title: 'UserInfo'
+description: 'Type representing authenticated user information and session data'
+---
+
+The `UserInfo` type represents the authenticated user's session information, including their profile, organization context, and permissions.
+
+## Type definition
+
+```typescript
+interface UserInfo {
+  user: User;
+  sessionId: string;
+  organizationId?: string;
+  role?: string;
+  roles?: string[];
+  permissions?: string[];
+  entitlements?: string[];
+  featureFlags?: string[];
+  impersonator?: Impersonator;
+  accessToken: string;
+}
+```
+
+## Properties
+
+<ResponseField name="user" type="User" required>
+  The authenticated user object from WorkOS. Contains user profile information such as email, name, and other user attributes.
+</ResponseField>
+
+<ResponseField name="sessionId" type="string" required>
+  The unique identifier for the user's session.
+</ResponseField>
+
+<ResponseField name="organizationId" type="string">
+  The ID of the organization the user is currently authenticated with, if applicable.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  The user's primary role within the organization.
+</ResponseField>
+
+<ResponseField name="roles" type="string[]">
+  An array of all roles assigned to the user within the organization.
+</ResponseField>
+
+<ResponseField name="permissions" type="string[]">
+  An array of permissions granted to the user based on their roles.
+</ResponseField>
+
+<ResponseField name="entitlements" type="string[]">
+  An array of entitlements available to the user.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="string[]">
+  An array of feature flags enabled for the user.
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator">
+  Information about the admin user who is impersonating this user, if applicable. See [Impersonator](/api/types/Session#impersonator) for details.
+</ResponseField>
+
+<ResponseField name="accessToken" type="string" required>
+  The JWT access token for the authenticated session.
+</ResponseField>
+
+## Usage
+
+The `UserInfo` type is returned by the `withAuth` function when a user is authenticated:
+
+```typescript
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function Page() {
+  const { user, sessionId, organizationId, roles } = await withAuth();
+
+  if (!user) {
+    return <div>Not authenticated</div>;
+  }
+
+  return (
+    <div>
+      <h1>Welcome, {user.firstName}!</h1>
+      <p>Session ID: {sessionId}</p>
+      {organizationId && <p>Organization: {organizationId}</p>}
+      {roles && <p>Roles: {roles.join(', ')}</p>}
+    </div>
+  );
+}
+```
+
+## Related types
+
+- [Session](/api/types/Session) - The underlying session data structure
+- [NoUserInfo](/api/types/UserInfo#nouserinfo) - Type for unauthenticated users
+
+## NoUserInfo
+
+When a user is not authenticated, the `NoUserInfo` type is returned instead:
+
+```typescript
+interface NoUserInfo {
+  user: null;
+  sessionId?: undefined;
+  organizationId?: undefined;
+  role?: undefined;
+  roles?: undefined;
+  permissions?: undefined;
+  entitlements?: undefined;
+  featureFlags?: undefined;
+  impersonator?: undefined;
+  accessToken?: undefined;
+}
+```
+
+This type ensures that all properties are explicitly `undefined` when no user is authenticated, making it type-safe to check for authentication by testing the `user` property.

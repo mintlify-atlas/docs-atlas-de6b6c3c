@@ -1,0 +1,92 @@
+---
+title: 'Session'
+description: 'Type representing a user session with authentication tokens'
+---
+
+The `Session` type represents the core session data stored for an authenticated user, including access and refresh tokens.
+
+## Type definition
+
+```typescript
+interface Session {
+  accessToken: string;
+  refreshToken: string;
+  user: User;
+  impersonator?: Impersonator;
+}
+```
+
+## Properties
+
+<ResponseField name="accessToken" type="string" required>
+  The JWT access token used to authenticate API requests. This token contains encoded claims about the user's session, including their ID, organization, and permissions.
+</ResponseField>
+
+<ResponseField name="refreshToken" type="string" required>
+  The refresh token used to obtain a new access token when the current one expires. This token is long-lived and securely stored.
+</ResponseField>
+
+<ResponseField name="user" type="User" required>
+  The authenticated user object from WorkOS, containing profile information such as:
+  - `id` - Unique user identifier
+  - `email` - User's email address
+  - `firstName` - User's first name
+  - `lastName` - User's last name
+  - Additional user attributes
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator">
+  Information about the admin user who is impersonating this user, if applicable. Only present during active impersonation sessions.
+</ResponseField>
+
+## Impersonator
+
+When an admin is impersonating a user, the `impersonator` field contains:
+
+```typescript
+interface Impersonator {
+  email: string;
+  reason: string | null;
+}
+```
+
+<ResponseField name="email" type="string" required>
+  The email address of the admin user performing the impersonation.
+</ResponseField>
+
+<ResponseField name="reason" type="string | null" required>
+  The reason provided for the impersonation session, or `null` if no reason was given.
+</ResponseField>
+
+## Usage
+
+The `Session` type is used internally by AuthKit to manage user sessions. You typically work with the [UserInfo](/api/types/UserInfo) type instead, which extends `Session` with additional decoded claims.
+
+### Saving a session manually
+
+For advanced authentication flows, you can manually save a session using `saveSession`:
+
+```typescript
+import { saveSession } from '@workos-inc/authkit-nextjs';
+import { workos } from '@workos-inc/node';
+
+export async function POST(req: NextRequest) {
+  const { code } = await req.json();
+  
+  // Authenticate with email verification code
+  const authResponse = await workos.userManagement.authenticateWithEmailVerification({
+    clientId: process.env.WORKOS_CLIENT_ID!,
+    code,
+  });
+
+  // Save the session
+  await saveSession(authResponse, req);
+
+  return Response.json({ success: true });
+}
+```
+
+## Related types
+
+- [UserInfo](/api/types/UserInfo) - Extended session information with decoded claims
+- [HandleAuthOptions](/api/types/HandleAuthOptions) - Configuration for the auth callback handler

@@ -1,0 +1,180 @@
+---
+title: 'AuthkitMiddlewareOptions'
+description: 'Configuration options for the AuthKit Next.js middleware'
+---
+
+The `AuthkitMiddlewareOptions` type configures the `authkitMiddleware` function that manages authentication for your Next.js application.
+
+## Type definition
+
+```typescript
+interface AuthkitMiddlewareOptions {
+  debug?: boolean;
+  middlewareAuth?: AuthkitMiddlewareAuth;
+  redirectUri?: string;
+  signUpPaths?: string[];
+  eagerAuth?: boolean;
+}
+```
+
+## Properties
+
+<ParamField path="debug" type="boolean" default={false}>
+  Enables debug logging for authentication operations. When `true`, logs session refresh attempts, authentication failures, and other diagnostic information to the console.
+  
+  Useful for troubleshooting authentication issues during development.
+</ParamField>
+
+<ParamField path="middlewareAuth" type="AuthkitMiddlewareAuth">
+  Configuration for automatic authentication enforcement. When enabled, unauthenticated users are automatically redirected to the sign-in page, except for paths in the `unauthenticatedPaths` allowlist.
+  
+  See [AuthkitMiddlewareAuth](#authkitmiddlewareauth) below.
+</ParamField>
+
+<ParamField path="redirectUri" type="string">
+  The callback URL where WorkOS will redirect users after authentication. Must match the redirect URI configured in your WorkOS dashboard.
+  
+  If not provided, falls back to the `WORKOS_REDIRECT_URI` environment variable.
+</ParamField>
+
+<ParamField path="signUpPaths" type="string[]" default={[]}>
+  Array of path patterns that should show the sign-up screen instead of sign-in. Supports glob patterns.
+  
+  Examples: `["/signup", "/register", "/join/*"]`
+</ParamField>
+
+<ParamField path="eagerAuth" type="boolean" default={false}>
+  When `true`, sets the access token as a client-side cookie on initial page loads, enabling client components to access authentication state without additional API calls.
+  
+  Only applies to document requests (initial page loads), not API or RSC requests.
+</ParamField>
+
+## AuthkitMiddlewareAuth
+
+Configuration for automatic authentication enforcement:
+
+```typescript
+interface AuthkitMiddlewareAuth {
+  enabled: boolean;
+  unauthenticatedPaths: string[];
+}
+```
+
+<ResponseField name="enabled" type="boolean" required>
+  Whether to enable automatic authentication enforcement. When `true`, all requests require authentication except those matching paths in `unauthenticatedPaths`.
+</ResponseField>
+
+<ResponseField name="unauthenticatedPaths" type="string[]" required>
+  Array of path patterns that don't require authentication. Supports glob patterns using path-to-regexp syntax.
+  
+  The callback redirect URI is automatically added to this list to prevent redirect loops.
+</ResponseField>
+
+## Usage
+
+### Basic middleware
+
+```typescript
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico).*)',
+  ],
+};
+```
+
+### With middleware auth enabled
+
+```typescript
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/', '/about', '/pricing', '/api/webhooks/*'],
+  },
+});
+
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico).*)',
+  ],
+};
+```
+
+### With sign-up paths
+
+```typescript
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  signUpPaths: ['/signup', '/register', '/join'],
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/', '/about'],
+  },
+});
+
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico).*)',
+  ],
+};
+```
+
+### With eager auth for client components
+
+```typescript
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  eagerAuth: true,
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/'],
+  },
+});
+
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico).*)',
+  ],
+};
+```
+
+### With debug mode
+
+```typescript
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  debug: process.env.NODE_ENV === 'development',
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/'],
+  },
+});
+
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico).*)',
+  ],
+};
+```
+
+## Path pattern matching
+
+The `unauthenticatedPaths` and `signUpPaths` arrays support glob patterns using [path-to-regexp](https://github.com/pillarjs/path-to-regexp) syntax:
+
+- `/about` - Exact match
+- `/blog/*` - Matches `/blog/` and `/blog/post-1`
+- `/api/:endpoint` - Matches `/api/users`, `/api/posts`, etc.
+- `/docs/**` - Matches `/docs/guide/intro` and any nested path
+
+## Related functions
+
+- `authkitMiddleware()` - Creates the middleware function (see source at ~/workspace/source/src/middleware.ts:6)
+- `authkit()` - Alternative API for manual session management

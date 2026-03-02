@@ -1,0 +1,164 @@
+---
+title: signOut
+description: Sign out the current user and clear their session
+---
+
+`signOut` ends the user's session by clearing their session cookie and redirecting them to the WorkOS logout URL. This function is typically used in server actions or route handlers.
+
+## Usage
+
+```typescript
+import { signOut } from '@workos-inc/authkit-nextjs';
+
+await signOut();
+```
+
+## Signature
+
+```typescript
+async function signOut(options?: { returnTo?: string }): Promise<never>
+```
+
+## Parameters
+
+<ParamField path="options" type="object" optional>
+  Configuration options for signing out.
+  
+  <Expandable title="properties">
+    <ParamField path="returnTo" type="string" optional>
+      The URL to redirect the user to after signing out. If not provided, uses the default Logout URI configured in your WorkOS dashboard.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Returns
+
+This function never returns as it always redirects. It has a return type of `Promise<never>`.
+
+## Examples
+
+### Basic sign-out button
+
+```typescript
+import { signOut } from '@workos-inc/authkit-nextjs';
+
+export default function SignOutButton() {
+  return (
+    <form
+      action={async () => {
+        'use server';
+        await signOut();
+      }}
+    >
+      <button type="submit">Sign out</button>
+    </form>
+  );
+}
+```
+
+### Sign out with custom redirect
+
+```typescript
+import { signOut } from '@workos-inc/authkit-nextjs';
+
+export default function Header() {
+  return (
+    <form
+      action={async () => {
+        'use server';
+        await signOut({ returnTo: 'https://yourapp.com/goodbye' });
+      }}
+    >
+      <button type="submit">Sign out</button>
+    </form>
+  );
+}
+```
+
+### Sign out from a server action
+
+```typescript
+'use server';
+
+import { signOut } from '@workos-inc/authkit-nextjs';
+
+export async function handleSignOut() {
+  // Perform cleanup before signing out
+  await logActivity('user_signed_out');
+  
+  await signOut();
+}
+```
+
+### Sign out and return to home page
+
+```typescript
+import { signOut } from '@workos-inc/authkit-nextjs';
+
+export default function SettingsPage() {
+  async function handleSignOut() {
+    'use server';
+    await signOut({ returnTo: '/' });
+  }
+  
+  return (
+    <form action={handleSignOut}>
+      <button type="submit">Sign out and return home</button>
+    </form>
+  );
+}
+```
+
+### Sign out with analytics tracking
+
+```typescript
+'use server';
+
+import { signOut, withAuth } from '@workos-inc/authkit-nextjs';
+
+export async function handleSignOutWithTracking() {
+  const { user } = await withAuth();
+  
+  if (user) {
+    await analytics.track('user_signed_out', {
+      userId: user.id,
+      email: user.email,
+      timestamp: new Date().toISOString(),
+    });
+  }
+  
+  await signOut();
+}
+```
+
+### Sign out from multiple pages
+
+```typescript
+// actions/auth.ts
+'use server';
+
+import { signOut } from '@workos-inc/authkit-nextjs';
+
+export async function handleSignOut() {
+  await signOut();
+}
+
+// components/Header.tsx
+import { handleSignOut } from '@/actions/auth';
+
+export default function Header() {
+  return (
+    <form action={handleSignOut}>
+      <button type="submit">Sign out</button>
+    </form>
+  );
+}
+```
+
+## Notes
+
+- `signOut` always triggers a redirect and never returns normally
+- The session cookie is deleted before redirecting
+- If the `returnTo` parameter is not provided, the user is redirected to the default Logout URI configured in your WorkOS dashboard settings
+- This function can be called from anywhere authentication is not required (it works without middleware)
+- The function will still work even if it cannot determine the session ID, falling back to a simple redirect

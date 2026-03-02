@@ -1,0 +1,282 @@
+---
+title: 'Authentication flow'
+description: 'Understand how AuthKit Next.js handles the complete authentication flow from initial request to session creation'
+keywords: ['authentication', 'oauth', 'authkit', 'flow', 'callback', 'authorization']
+---
+
+AuthKit Next.js implements a secure OAuth 2.0-based authentication flow that seamlessly integrates with your Next.js application. This page explains how the authentication process works from start to finish.
+
+## Overview
+
+The authentication flow consists of four main phases:
+
+<Steps>
+  <Step title="Authorization request">
+    User initiates sign-in and is redirected to WorkOS AuthKit
+  </Step>
+  <Step title="User authentication">
+    User authenticates with WorkOS AuthKit (SSO, password, magic link, etc.)
+  </Step>
+  <Step title="Callback handling">
+    AuthKit redirects back to your app with an authorization code
+  </Step>
+  <Step title="Token exchange">
+    Your app exchanges the code for access and refresh tokens
+  </Step>
+</Steps>
+
+## Phase 1: Authorization request
+
+When a user needs to sign in, your application generates an authorization URL and redirects them to WorkOS AuthKit.
+
+### Generating the authorization URL
+
+The `getAuthorizationUrl()` function creates a properly formatted OAuth 2.0 authorization URL:
+
+```typescript
+import { getAuthorizationUrl } from '@workos-inc/authkit-nextjs';
+
+const authUrl = await getAuthorizationUrl({
+  screenHint: 'sign-in',
+  returnPathname: '/dashboard',
+  organizationId: 'org_123',
+});
+```
+
+Key parameters include:
+
+- **screenHint** - Whether to show the sign-in or sign-up screen
+- **returnPathname** - Where to redirect after successful authentication
+- **organizationId** - Specific organization for SSO flows
+- **loginHint** - Pre-fill the email field
+- **state** - Custom state to pass through the flow
+
+### State management
+
+AuthKit automatically manages OAuth state to ensure security and proper return navigation. The state parameter includes:
+
+1. **Internal state** - Encoded return pathname for post-auth navigation
+2. **Custom state** - Optional user-provided state data
+
+The internal state is base64-encoded and URL-safe:
+
+```typescript
+const internalState = btoa(JSON.stringify({ returnPathname }));
+const finalState = internalState + '.' + customState;
+```
+
+<Info>
+The middleware automatically determines the correct redirect URI from your configuration. You can override it per-request if needed.
+</Info>
+
+## Phase 2: User authentication
+
+Once redirected to AuthKit, the user authenticates using one of several methods:
+
+- **Password authentication** - Email and password
+- **Magic link** - Passwordless email authentication  
+- **SSO** - SAML or OAuth connections
+- **Social login** - Google, Microsoft, GitHub, etc.
+- **MFA** - Multi-factor authentication if required
+
+AuthKit handles all the complexity of these authentication methods. Your application doesn't need to implement any of this logic.
+
+## Phase 3: Callback handling
+
+After successful authentication, WorkOS AuthKit redirects back to your callback route with an authorization code.
+
+### Setting up the callback route
+
+Create a callback route handler using the `handleAuth()` function:
+
+```typescript app/api/auth/callback/route.ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth();
+```
+
+The callback URL receives:
+- **code** - Authorization code to exchange for tokens
+- **state** - The state parameter sent in the initial request
+
+### Callback processing
+
+When the callback route is hit, `handleAuth()` performs these operations:
+
+<Steps>
+  <Step title="Extract parameters">
+    Retrieves the authorization code and state from query parameters
+  </Step>
+  <Step title="Decode state">
+    Extracts the return pathname and any custom state data
+  </Step>
+  <Step title="Exchange code for tokens">
+    Calls WorkOS API to exchange the code for access and refresh tokens
+  </Step>
+  <Step title="Create session">
+    Encrypts and stores tokens in a secure HTTP-only cookie
+  </Step>
+  <Step title="Redirect user">
+    Redirects to the original return pathname
+  </Step>
+</Steps>
+
+Here's what happens in the code:
+
+```typescript
+// Extract code and state from callback URL
+const code = request.nextUrl.searchParams.get('code');
+const state = request.nextUrl.searchParams.get('state');
+
+// Exchange code for tokens
+const { accessToken, refreshToken, user, impersonator } = 
+  await workos.userManagement.authenticateWithCode({
+    clientId: WORKOS_CLIENT_ID,
+    code,
+  });
+
+// Save encrypted session
+await saveSession({ accessToken, refreshToken, user, impersonator }, request);
+```
+
+### Custom callback handling
+
+You can hook into the callback flow with custom logic:
+
+```typescript
+export const GET = handleAuth({
+  returnPathname: '/dashboard',
+  onSuccess: async ({ user, organizationId, oauthTokens }) => {
+    // Log successful authentication
+    console.log(`User ${user.email} signed in`);
+    
+    // Store OAuth tokens for API calls
+    if (oauthTokens) {
+      await storeOAuthTokens(user.id, oauthTokens);
+    }
+  },
+  onError: async ({ error, request }) => {
+    // Custom error handling
+    console.error('Auth failed:', error);
+    return NextResponse.redirect(new URL('/error', request.url));
+  },
+});
+```
+
+<Warning>
+The callback route should never be protected by authentication middleware, or you'll create an infinite redirect loop.
+</Warning>
+
+## Phase 4: Token exchange
+
+The authorization code is exchanged for two tokens:
+
+### Access token
+
+A short-lived JWT (typically 5-10 minutes) that contains:
+
+- **User information** - User ID, email, name
+- **Session ID** - Unique identifier for this session
+- **Organization context** - Organization ID and role
+- **Permissions** - User's permissions array
+- **Entitlements** - Active feature entitlements
+- **Feature flags** - Enabled feature flags
+
+Access tokens are verified using WorkOS's public JWKS:
+
+```typescript
+const JWKS = createRemoteJWKSet(
+  new URL(workos.userManagement.getJwksUrl(clientId))
+);
+
+await jwtVerify(accessToken, JWKS);
+```
+
+### Refresh token
+
+A long-lived opaque token used to obtain new access tokens when they expire. Refresh tokens:
+
+- Are stored securely in an encrypted session cookie
+- Never exposed to the client-side JavaScript
+- Can be revoked by WorkOS if the session is terminated
+
+## Security considerations
+
+<AccordionGroup>
+  <Accordion title="Session encryption">
+    Sessions are encrypted using `iron-session` with a 32+ character password. This ensures tokens cannot be read or tampered with by clients.
+    
+    ```typescript
+    const encryptedSession = await sealData(session, {
+      password: WORKOS_COOKIE_PASSWORD,
+      ttl: 0,
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Cookie security">
+    Session cookies use secure settings:
+    
+    - **HttpOnly** - Prevents JavaScript access
+    - **Secure** - HTTPS only (except localhost)
+    - **SameSite** - Lax or Strict for CSRF protection
+    - **Long expiry** - Up to 400 days (tokens control actual session lifetime)
+  </Accordion>
+  
+  <Accordion title="State validation">
+    The OAuth state parameter prevents CSRF attacks by ensuring the callback matches the original request. State is validated on return.
+  </Accordion>
+  
+  <Accordion title="Token verification">
+    Access tokens are cryptographically verified using WorkOS's public keys before trusting their contents.
+  </Accordion>
+</AccordionGroup>
+
+## Error handling
+
+Authentication can fail at several points:
+
+### Authorization errors
+
+- **Missing configuration** - Required environment variables not set
+- **Invalid redirect URI** - Callback URL doesn't match configuration
+- **SSO errors** - Organization requires SSO but connection is misconfigured
+
+### Callback errors
+
+- **Missing code** - No authorization code in callback URL
+- **Invalid code** - Code already used or expired
+- **Network errors** - Unable to reach WorkOS API
+
+### Token errors
+
+- **Invalid tokens** - Malformed or corrupted tokens
+- **Expired tokens** - Access token expired (handled automatically by refresh)
+
+All errors are caught and can be handled with the `onError` callback:
+
+```typescript
+export const GET = handleAuth({
+  onError: async ({ error, request }) => {
+    // Log error for debugging
+    console.error('Authentication error:', error);
+    
+    // Redirect to error page with message
+    const errorUrl = new URL('/auth/error', request.url);
+    errorUrl.searchParams.set('message', 'Authentication failed');
+    
+    return Response.redirect(errorUrl);
+  },
+});
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Session management" icon="clock" href="/core-concepts/session-management">
+    Learn how sessions are maintained and refreshed
+  </Card>
+  <Card title="Middleware" icon="shield" href="/core-concepts/middleware">
+    Understand how middleware protects your routes
+  </Card>
+</CardGroup>

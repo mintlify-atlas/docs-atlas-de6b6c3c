@@ -1,0 +1,392 @@
+---
+title: CDN deployments and caching
+description: Learn how AuthKit handles caching and session security in CDN environments like AWS CloudFront, Cloudflare, and Vercel
+---
+
+When deploying Next.js applications to CDN environments, proper cache configuration is critical to prevent session leakage between users. AuthKit automatically implements security measures to protect authenticated requests.
+
+## How it works
+
+AuthKit automatically sets cache security headers on all authenticated requests to prevent CDNs from caching user-specific content:
+
+```
+Cache-Control: private, no-cache, no-store, must-revalidate, max-age=0
+Pragma: no-cache
+Expires: 0
+Vary: Cookie
+x-middleware-cache: no-cache
+```
+
+These headers are applied when:
+
+- A session cookie is present in the request
+- An `Authorization` header is detected
+- An active authenticated session exists
+
+<Note>
+These headers are added automatically by the AuthKit middleware. No configuration is required.
+</Note>
+
+## Deployment platforms
+
+### AWS with SST/OpenNext
+
+AuthKit works out-of-the-box with SST and OpenNext deployments:
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+export const config = { 
+  matcher: ['/', '/dashboard/:path*'] 
+};
+```
+
+The cache headers ensure CloudFront:
+
+- Does not cache authenticated pages
+- Always forwards requests to your origin
+- Differentiates between users via the `Vary: Cookie` header
+
+### Vercel
+
+Vercel respects the cache headers automatically:
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+export const config = { 
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] 
+};
+```
+
+<Warning>
+Avoid using broad middleware matchers that intercept static assets. This can cause styles to break, especially with Tailwind CSS v4.
+</Warning>
+
+### Cloudflare Pages
+
+AuthKit cache headers work with Cloudflare's caching layer:
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+export const config = { 
+  matcher: ['/app/:path*', '/dashboard/:path*'] 
+};
+```
+
+### Custom CDN configurations
+
+For custom CDN setups, ensure your CDN respects:
+
+- `Cache-Control` directives
+- `Vary: Cookie` header for per-user differentiation
+- `x-middleware-cache: no-cache` for Next.js middleware caching
+
+## Public vs authenticated pages
+
+### Authenticated pages
+
+Authenticated pages are never cached at the CDN level and always hit your origin server:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function DashboardPage() {
+  // This page will not be cached at the CDN
+  const { user } = await withAuth({ ensureSignedIn: true });
+
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>Welcome, {user.firstName}!</p>
+    </div>
+  );
+}
+```
+
+### Public pages
+
+Public pages without authentication context can be cached normally:
+
+```tsx
+// This page can be cached by the CDN
+export default function PublicPage() {
+  return (
+    <div>
+      <h1>Welcome to our app</h1>
+      <p>This content is public and can be cached</p>
+    </div>
+  );
+}
+```
+
+### Mixed pages
+
+Pages with conditional authentication still receive cache prevention headers when a session exists:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function HomePage() {
+  const { user } = await withAuth();
+
+  // Cache headers are added if user is authenticated
+  // Otherwise, page can be cached normally
+
+  return (
+    <div>
+      <h1>Welcome</h1>
+      {user ? (
+        <p>Hello, {user.firstName}!</p>
+      ) : (
+        <p>Public content</p>
+      )}
+    </div>
+  );
+}
+```
+
+## Performance considerations
+
+### Origin requests for authenticated pages
+
+Authenticated pages always hit your origin server, which is the correct and secure behavior:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function ProfilePage() {
+  // Every request hits the origin (not cached at CDN)
+  const { user } = await withAuth({ ensureSignedIn: true });
+
+  return (
+    <div>
+      <h1>Your Profile</h1>
+      <p>{user.email}</p>
+    </div>
+  );
+}
+```
+
+### Optimizing static assets
+
+Exclude static assets from middleware to allow CDN caching:
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+export const config = {
+  // Exclude static assets from middleware
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
+};
+```
+
+### API routes
+
+API routes with authentication also receive cache prevention headers:
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export async function GET(request: NextRequest) {
+  const { user } = await withAuth();
+
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // This response will not be cached at the CDN
+  return NextResponse.json({ data: `User-specific data for ${user.email}` });
+}
+```
+
+## Docker and containerized deployments
+
+When deploying to containers where the hostname differs from the public URL, set the `baseURL` option:
+
+```ts
+// app/callback/route.ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  baseURL: process.env.PUBLIC_URL || 'https://example.com',
+});
+```
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  redirectUri: process.env.PUBLIC_URL + '/callback',
+});
+
+export const config = { matcher: ['/', '/dashboard/:path*'] };
+```
+
+## Debug mode
+
+Enable debug logging to troubleshoot caching issues:
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  debug: true,
+});
+
+export const config = { matcher: ['/', '/dashboard/:path*'] };
+```
+
+This logs:
+
+- Session refresh events
+- Cache header application
+- Redirect decisions
+
+## Manual cache control
+
+For advanced use cases with custom middleware, use the `authkit` function:
+
+```ts
+import { NextRequest } from 'next/server';
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+
+export default async function middleware(request: NextRequest) {
+  const { session, headers, authorizationUrl } = await authkit(request);
+
+  // Cache headers are already set in `headers`
+  
+  if (!session.user && request.nextUrl.pathname.startsWith('/dashboard')) {
+    return handleAuthkitHeaders(request, headers, { 
+      redirect: authorizationUrl as string 
+    });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+
+export const config = { matcher: ['/', '/dashboard/:path*'] };
+```
+
+<Note>
+The `handleAuthkitHeaders` helper ensures cache headers are properly applied and internal headers are filtered.
+</Note>
+
+## Monitoring cache behavior
+
+Check cache headers in your browser's developer tools:
+
+<Steps>
+
+### Open network tab
+
+Open your browser's developer tools and navigate to the Network tab.
+
+### Load an authenticated page
+
+Navigate to a page that requires authentication in your application.
+
+### Inspect response headers
+
+Click on the request and view the response headers. You should see:
+
+```
+Cache-Control: private, no-cache, no-store, must-revalidate, max-age=0
+Pragma: no-cache
+Expires: 0
+Vary: Cookie
+```
+
+### Verify CDN behavior
+
+Look for CDN-specific headers like `x-cache` (Cloudflare) or `x-amz-cf-pop` (CloudFront) to confirm requests are hitting your origin.
+
+</Steps>
+
+## Common issues
+
+### Styles not loading
+
+If styles aren't loading, your middleware matcher may be too broad:
+
+```ts
+// ❌ Bad: Intercepts static assets
+export const config = { matcher: '/:path*' };
+
+// ✅ Good: Excludes static assets
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+};
+```
+
+### Cached user data showing wrong user
+
+Ensure the middleware is running on all authenticated routes:
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+// Make sure matcher includes all routes using withAuth
+export const config = { 
+  matcher: ['/', '/dashboard/:path*', '/profile/:path*'] 
+};
+```
+
+### Origin requests for static pages
+
+Public pages hitting origin instead of CDN cache:
+
+```tsx
+// ❌ Don't call withAuth on public pages
+export default async function PublicPage() {
+  const { user } = await withAuth(); // Adds cache prevention headers
+  return <div>Public content</div>;
+}
+
+// ✅ Only call withAuth when needed
+export default async function PublicPage() {
+  // No auth check = CDN can cache this page
+  return <div>Public content</div>;
+}
+```
+
+## Best practices
+
+<Tip>
+**Optimize CDN performance:**
+
+- Only run middleware on routes that need authentication
+- Exclude static assets from middleware matchers
+- Use specific matchers instead of catch-all patterns
+- Cache public pages aggressively
+- Never cache user-specific content
+</Tip>
+
+<Warning>
+Never disable or override cache prevention headers on authenticated routes. This can cause serious security issues where users see each other's data.
+</Warning>
+
+<Note>
+The `Vary: Cookie` header provides defense-in-depth. Even if other cache headers fail, CDNs will differentiate requests by cookie values.
+</Note>

@@ -1,0 +1,334 @@
+---
+title: User impersonation
+description: Learn how to implement and display user impersonation in your Next.js application
+---
+
+User impersonation allows administrators to sign in as another user to troubleshoot issues or provide support. AuthKit provides built-in components and APIs to handle impersonation securely.
+
+## Displaying impersonation status
+
+Use the `Impersonation` component to show when an admin is impersonating a user:
+
+```tsx
+import { AuthKitProvider, Impersonation } from '@workos-inc/authkit-nextjs/components';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <AuthKitProvider>
+          <Impersonation />
+          {children}
+        </AuthKitProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+The component automatically:
+
+- Displays when an impersonation session is active
+- Shows the impersonated user's email and organization
+- Provides a "Stop" button to end impersonation
+- Can be minimized to reduce screen space
+
+<Note>
+The `Impersonation` component only renders when an active impersonation session is detected. It has no visual impact during normal user sessions.
+</Note>
+
+## Customizing the impersonation banner
+
+Control the banner's position and return URL:
+
+```tsx
+import { Impersonation } from '@workos-inc/authkit-nextjs/components';
+
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <div>
+      {/* Display at top of page */}
+      <Impersonation side="top" returnTo="/admin/users" />
+      
+      {children}
+
+      {/* Or display at bottom (default) */}
+      {/* <Impersonation side="bottom" returnTo="/admin" /> */}
+    </div>
+  );
+}
+```
+
+### Styling the impersonation banner
+
+Customize the appearance using CSS custom properties:
+
+```css
+/* styles/globals.css */
+[data-workos-impersonation-root] {
+  --workos-impersonation-size: 6px;
+  --workos-impersonation-background-color: #fce654;
+  --workos-impersonation-color: #1a1600;
+  --workos-impersonation-border-color: #e0c36c;
+  --workos-impersonation-border-width: 2px;
+}
+```
+
+Available CSS custom properties:
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `--workos-impersonation-size` | `4px` | Frame border size (2px-15px) |
+| `--workos-impersonation-background-color` | `#fce654` | Banner background color |
+| `--workos-impersonation-color` | `#1a1600` | Text color |
+| `--workos-impersonation-border-color` | `#e0c36c` | Border color |
+| `--workos-impersonation-border-width` | `1px` | Border width |
+
+## Detecting impersonation in server components
+
+Check if the current session is an impersonation session:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function UserProfile() {
+  const { user, impersonator } = await withAuth({ ensureSignedIn: true });
+
+  return (
+    <div>
+      {impersonator && (
+        <div className="impersonation-alert">
+          <strong>Impersonation Active</strong>
+          <p>
+            {impersonator.email} is viewing this page as {user.email}
+          </p>
+        </div>
+      )}
+
+      <h1>User Profile</h1>
+      <p>Email: {user.email}</p>
+      <p>Name: {user.firstName} {user.lastName}</p>
+    </div>
+  );
+}
+```
+
+## Detecting impersonation in client components
+
+Use the `useAuth` hook to check for impersonation:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function Dashboard() {
+  const { user, impersonator, loading } = useAuth();
+
+  if (loading) return <div>Loading...</div>;
+  if (!user) return <div>Not authenticated</div>;
+
+  return (
+    <div>
+      {impersonator && (
+        <div className="alert alert-warning">
+          Admin {impersonator.email} is impersonating {user.email}
+        </div>
+      )}
+
+      <h1>Dashboard</h1>
+      <p>Welcome, {user.firstName}!</p>
+    </div>
+  );
+}
+```
+
+## Impersonator information
+
+The `impersonator` object contains:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `email` | `string` | Email of the admin performing impersonation |
+| `reason` | `string \| null` | Optional reason provided for impersonation |
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function AuditLog() {
+  const { user, impersonator } = await withAuth({ ensureSignedIn: true });
+
+  if (impersonator) {
+    console.log('Impersonation details:', {
+      admin: impersonator.email,
+      targetUser: user.email,
+      reason: impersonator.reason || 'No reason provided',
+    });
+  }
+
+  return <div>Audit Log</div>;
+}
+```
+
+## Ending impersonation
+
+The built-in `Impersonation` component includes a stop button. You can also end impersonation programmatically:
+
+### Server-side
+
+```tsx
+import { signOut } from '@workos-inc/authkit-nextjs';
+
+export default function StopImpersonationButton() {
+  return (
+    <form
+      action={async () => {
+        'use server';
+        await signOut({ returnTo: '/admin/users' });
+      }}
+    >
+      <button type="submit">Stop impersonating</button>
+    </form>
+  );
+}
+```
+
+### Client-side
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function StopImpersonationButton() {
+  const { impersonator, signOut } = useAuth();
+
+  if (!impersonator) return null;
+
+  return (
+    <button onClick={() => signOut({ returnTo: '/admin/users' })}>
+      Stop impersonating
+    </button>
+  );
+}
+```
+
+<Note>
+Calling `signOut` during an impersonation session ends the impersonation and returns the admin to their own session.
+</Note>
+
+## Conditional features during impersonation
+
+Disable or modify certain features when impersonating:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function SettingsPage() {
+  const { user, impersonator } = await withAuth({ ensureSignedIn: true });
+
+  return (
+    <div>
+      <h1>Settings</h1>
+
+      {impersonator ? (
+        <div className="readonly-mode">
+          <p>Viewing in read-only mode (impersonation active)</p>
+          <p>User: {user.email}</p>
+          <p>Admin: {impersonator.email}</p>
+        </div>
+      ) : (
+        <form>
+          <input name="email" defaultValue={user.email} />
+          <button type="submit">Save changes</button>
+        </form>
+      )}
+    </div>
+  );
+}
+```
+
+## Logging impersonation events
+
+Track impersonation sessions for security and compliance:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+import { headers } from 'next/headers';
+
+export default async function ProtectedPage() {
+  const { user, impersonator, sessionId } = await withAuth({ ensureSignedIn: true });
+  
+  if (impersonator) {
+    const headersList = await headers();
+    const userAgent = headersList.get('user-agent');
+    
+    await logImpersonationEvent({
+      admin: impersonator.email,
+      targetUser: user.email,
+      sessionId,
+      userAgent,
+      timestamp: new Date(),
+      reason: impersonator.reason,
+    });
+  }
+
+  return <div>Protected content</div>;
+}
+```
+
+## Starting impersonation
+
+Impersonation is started through the WorkOS dashboard or API, not directly in your Next.js app. See the [WorkOS impersonation documentation](https://workos.com/docs/user-management/impersonation) for details on initiating impersonation sessions.
+
+<Steps>
+
+### Enable impersonation in WorkOS
+
+Configure impersonation settings in the WorkOS dashboard under User Management settings.
+
+### Initiate impersonation
+
+Use the WorkOS API or dashboard to start an impersonation session:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function startImpersonation(userId: string, reason: string) {
+  const workos = getWorkOS();
+  
+  const { url } = await workos.userManagement.createPortalSession({
+    organizationId: 'org_123',
+    userId,
+    returnUrl: 'https://example.com/admin/users',
+  });
+
+  return url;
+}
+```
+
+### Detect impersonation
+
+Your Next.js app automatically detects impersonation sessions through AuthKit. Display the impersonation banner and handle the session accordingly.
+
+</Steps>
+
+## Best practices
+
+<Warning>
+Always display a clear visual indicator when impersonation is active. Users (and admins) should never be confused about whose account is currently active.
+</Warning>
+
+<Tip>
+**Security considerations:**
+
+- Log all impersonation events for audit purposes
+- Require a reason for impersonation when possible
+- Limit impersonation to specific admin roles
+- Consider disabling sensitive operations during impersonation
+- Set up alerts for impersonation sessions
+</Tip>
+
+<Note>
+The impersonation session has the same permissions and access as the impersonated user. Be cautious when impersonating users with elevated privileges.
+</Note>

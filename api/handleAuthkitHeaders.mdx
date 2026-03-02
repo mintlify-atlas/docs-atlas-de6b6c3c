@@ -1,0 +1,185 @@
+---
+title: handleAuthkitHeaders
+description: Create a Next.js response with properly merged AuthKit headers
+---
+
+## Overview
+
+The `handleAuthkitHeaders` function creates a NextResponse with properly merged AuthKit headers. It ensures that:
+
+- Internal AuthKit headers are forwarded to your pages (so `withAuth()` works)
+- Session data is never leaked to the browser
+- Only safe response headers are sent to the client
+- Cache headers are properly set when cookies are present
+- Redirects are properly normalized to absolute URLs
+
+This is the recommended way to return responses when using the `authkit` function for composable middleware.
+
+## Function signature
+
+```typescript
+function handleAuthkitHeaders(
+  request: NextRequest,
+  authkitHeaders: Headers,
+  options?: HandleAuthkitHeadersOptions
+): NextResponse
+```
+
+## Parameters
+
+<ParamField path="request" type="NextRequest" required>
+  The Next.js request object from your middleware/proxy function.
+</ParamField>
+
+<ParamField path="authkitHeaders" type="Headers" required>
+  The headers object returned from the `authkit()` function. Contains both internal AuthKit headers and response headers.
+</ParamField>
+
+<ParamField path="options" type="HandleAuthkitHeadersOptions" optional>
+  Optional configuration for the response
+  
+  <ParamField path="redirect" type="string | URL" optional>
+    URL to redirect to. Can be relative (e.g., `/login`) or absolute (e.g., `https://example.com/login`). Relative URLs are automatically normalized to absolute URLs based on the request URL.
+  </ParamField>
+  
+  <ParamField path="redirectStatus" type="302 | 303 | 307 | 308" optional>
+    HTTP redirect status code. Defaults to 307 for GET/HEAD requests, and 303 for POST/PUT/DELETE requests (to prevent form resubmission).
+  </ParamField>
+</ParamField>
+
+## Return value
+
+<ResponseField name="response" type="NextResponse">
+  A Next.js response object with properly merged headers. Either a redirect response (if `redirect` option provided) or a continuation response that forwards the request to the next handler.
+</ResponseField>
+
+## Basic usage
+
+Continue the request with merged headers:
+
+```typescript
+import { NextRequest } from 'next/server';
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+
+export default async function proxy(request: NextRequest) {
+  const { headers } = await authkit(request);
+  
+  // Continue request with properly merged headers
+  return handleAuthkitHeaders(request, headers);
+}
+```
+
+## Usage with redirects
+
+Redirect unauthenticated users to sign-in:
+
+```typescript
+import { NextRequest } from 'next/server';
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+
+export default async function proxy(request: NextRequest) {
+  const { session, headers, authorizationUrl } = await authkit(request);
+  const { pathname } = request.nextUrl;
+
+  // Redirect unauthenticated users to AuthKit
+  if (pathname.startsWith('/dashboard') && !session.user && authorizationUrl) {
+    return handleAuthkitHeaders(request, headers, {
+      redirect: authorizationUrl,
+    });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+```
+
+## Usage with relative redirects
+
+Redirect to a relative path:
+
+```typescript
+import { NextRequest } from 'next/server';
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+
+export default async function proxy(request: NextRequest) {
+  const { session, headers } = await authkit(request);
+  const { pathname } = request.nextUrl;
+
+  // Redirect authenticated users away from login page
+  if (pathname === '/login' && session.user) {
+    return handleAuthkitHeaders(request, headers, {
+      redirect: '/dashboard',
+    });
+  }
+
+  // Custom redirect with relative URL
+  if (pathname === '/old-page') {
+    return handleAuthkitHeaders(request, headers, {
+      redirect: '/new-page',
+    });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+```
+
+## Usage with custom redirect status
+
+Control the redirect behavior:
+
+```typescript
+import { NextRequest } from 'next/server';
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+
+export default async function proxy(request: NextRequest) {
+  const { headers } = await authkit(request);
+  const { pathname } = request.nextUrl;
+
+  // Permanent redirect (308)
+  if (pathname === '/old-url') {
+    return handleAuthkitHeaders(request, headers, {
+      redirect: '/new-url',
+      redirectStatus: 308,
+    });
+  }
+
+  // Temporary redirect that converts POST to GET (303)
+  if (pathname === '/form-submission') {
+    return handleAuthkitHeaders(request, headers, {
+      redirect: '/thank-you',
+      redirectStatus: 303,
+    });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+```
+
+## What headers are forwarded?
+
+### Internal request headers (forwarded to pages, never sent to browser)
+
+- `x-workos-middleware`: Flag indicating AuthKit middleware is active
+- `x-workos-session`: Encrypted session data
+- `x-url`: Current request URL
+- `x-redirect-uri`: OAuth callback URI
+- `x-sign-up-paths`: Paths configured for sign-up flow
+
+### Response headers (sent to browser)
+
+- `set-cookie`: Session cookies (multiple cookies properly appended)
+- `cache-control`: Auto-set to `no-store` when cookies are present
+- `vary`: Cache variation keys (deduplicated when merging)
+- `www-authenticate`: Authentication challenges
+- `proxy-authenticate`: Proxy authentication challenges
+- `link`: Pagination, preload hints, etc.
+- `x-middleware-cache`: Set to `no-cache` to prevent stale responses
+
+## Important notes
+
+- Always use this helper when working with `authkit()` function
+- Never manually forward AuthKit headers to the browser
+- Client-injected `x-workos-*` headers are automatically stripped and replaced with trusted values
+- Only use the `redirect` option with trusted values (like `authorizationUrl` from `authkit()`)
+- Never pass user-controlled input directly to `redirect` without validation
+- Relative redirect URLs are automatically converted to absolute URLs
+- POST/PUT/DELETE requests default to 303 status to prevent form resubmission

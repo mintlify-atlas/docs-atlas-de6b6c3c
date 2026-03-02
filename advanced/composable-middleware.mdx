@@ -1,0 +1,291 @@
+---
+title: "Composable middleware"
+description: "Build custom middleware by combining AuthKit with other logic like rate limiting, redirects, and rewrites"
+---
+
+The `authkit()` function and `handleAuthkitHeaders()` helper enable you to compose AuthKit with other middleware logic, giving you full control over the request/response cycle.
+
+## When to use composable middleware
+
+Use composable middleware when you need to:
+
+- Combine authentication with rate limiting or other security measures
+- Implement custom redirect logic based on session state
+- Add logging or analytics to authentication flows
+- Integrate with feature flags or A/B testing
+- Control access based on custom business logic
+
+For basic authentication needs, use the standard `authkitMiddleware()` function instead.
+
+## Basic usage
+
+Replace `authkitMiddleware()` with a custom middleware function:
+
+```ts
+// middleware.ts
+import { NextRequest } from 'next/server';
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+
+export default async function middleware(request: NextRequest) {
+  // Get session, headers, and the WorkOS authorization URL
+  const { session, headers, authorizationUrl } = await authkit(request);
+
+  const { pathname } = request.nextUrl;
+
+  // Redirect unauthenticated users on protected routes
+  if (pathname.startsWith('/app') && !session.user && authorizationUrl) {
+    return handleAuthkitHeaders(request, headers, { redirect: authorizationUrl });
+  }
+
+  // Continue request with properly merged headers
+  return handleAuthkitHeaders(request, headers);
+}
+
+export const config = { matcher: ['/', '/app/:path*'] };
+```
+
+## Key concepts
+
+### The authkit() function
+
+The `authkit()` function handles session validation and refresh:
+
+```ts
+const { session, headers, authorizationUrl } = await authkit(request, {
+  debug: false,
+  redirectUri: 'https://example.com/callback',
+  screenHint: 'sign-in',
+  eagerAuth: false,
+  onSessionRefreshSuccess: ({ accessToken, user }) => {
+    console.log('Session refreshed for', user.email);
+  },
+  onSessionRefreshError: ({ error, request }) => {
+    console.error('Session refresh failed:', error);
+  },
+});
+```
+
+It returns:
+
+- `session` - User info and access token, or `{ user: null }` if unauthenticated
+- `headers` - Internal headers that must be forwarded to your pages
+- `authorizationUrl` - The URL to redirect users to for sign-in (only present when unauthenticated)
+
+### The handleAuthkitHeaders() helper
+
+<Warning>
+Always use `handleAuthkitHeaders()` when returning a response. This ensures internal AuthKit headers are properly passed to your pages while preventing them from being leaked to the browser.
+</Warning>
+
+The helper handles:
+
+- Forwarding internal headers (`x-workos-session`, `x-url`, etc.) to your pages
+- Filtering out sensitive headers before sending to the browser
+- Applying response headers like `Set-Cookie`, `Cache-Control`, and `Vary`
+- Auto-adding `Cache-Control: no-store` when cookies are present
+- Normalizing relative URLs to absolute URLs for redirects
+- Using appropriate redirect status codes (307 for GET, 303 for POST)
+
+## Common patterns
+
+### Custom authentication logic
+
+Implement role-based or custom access control:
+
+```ts
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+
+export default async function middleware(request: NextRequest) {
+  const { session, headers, authorizationUrl } = await authkit(request);
+  const { pathname } = request.nextUrl;
+
+  // Admin routes require authentication and admin role
+  if (pathname.startsWith('/admin')) {
+    if (!session.user) {
+      return handleAuthkitHeaders(request, headers, { redirect: authorizationUrl });
+    }
+    
+    // Check for admin role
+    if (!session.role || session.role !== 'admin') {
+      return handleAuthkitHeaders(request, headers, { redirect: '/unauthorized' });
+    }
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+```
+
+### Combining with redirects
+
+Add custom redirect logic:
+
+```ts
+export default async function middleware(request: NextRequest) {
+  const { session, headers, authorizationUrl } = await authkit(request);
+  const { pathname } = request.nextUrl;
+
+  // Redirect authenticated users away from auth pages
+  if (pathname === '/login' && session.user) {
+    return handleAuthkitHeaders(request, headers, { redirect: '/dashboard' });
+  }
+
+  // Old path redirects
+  if (pathname === '/old-path') {
+    return handleAuthkitHeaders(request, headers, { redirect: '/new-path' });
+  }
+
+  // Protected routes
+  if (pathname.startsWith('/app') && !session.user) {
+    return handleAuthkitHeaders(request, headers, { redirect: authorizationUrl });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+```
+
+### Rate limiting
+
+Combine with rate limiting logic:
+
+```ts
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+import { rateLimit } from './rate-limiter';
+
+export default async function middleware(request: NextRequest) {
+  const { session, headers, authorizationUrl } = await authkit(request);
+
+  // Apply rate limits based on user or IP
+  const identifier = session.user?.id || request.ip || 'anonymous';
+  const { success } = await rateLimit(identifier);
+
+  if (!success) {
+    return new NextResponse('Too many requests', { status: 429 });
+  }
+
+  // Continue with auth flow
+  if (request.nextUrl.pathname.startsWith('/api') && !session.user) {
+    return handleAuthkitHeaders(request, headers, { redirect: authorizationUrl });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+```
+
+### Organization-based routing
+
+Route users based on their organization:
+
+```ts
+export default async function middleware(request: NextRequest) {
+  const { session, headers } = await authkit(request);
+  const { pathname } = request.nextUrl;
+
+  // Route to organization-specific app if user has org context
+  if (pathname === '/' && session.user && session.organizationId) {
+    return handleAuthkitHeaders(request, headers, {
+      redirect: `/org/${session.organizationId}/dashboard`,
+    });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+```
+
+## Advanced: Rewrites and custom responses
+
+For advanced use cases like rewrites, use the lower-level `partitionAuthkitHeaders()` and `applyResponseHeaders()` functions:
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  authkit,
+  partitionAuthkitHeaders,
+  applyResponseHeaders,
+} from '@workos-inc/authkit-nextjs';
+
+export default async function middleware(request: NextRequest) {
+  const { headers } = await authkit(request);
+  
+  // Split headers into request and response headers
+  const { requestHeaders, responseHeaders } = partitionAuthkitHeaders(request, headers);
+
+  // Create your own response (rewrite, etc.)
+  const response = NextResponse.rewrite(
+    new URL('/app/dashboard', request.url),
+    { request: { headers: requestHeaders } }
+  );
+
+  // Apply AuthKit response headers (Set-Cookie, Cache-Control, etc.)
+  applyResponseHeaders(response, responseHeaders);
+
+  return response;
+}
+```
+
+<Warning>
+When using `partitionAuthkitHeaders()` and `applyResponseHeaders()`, ensure:
+
+- Request headers are passed to `NextResponse.next()` or `NextResponse.rewrite()`
+- Response headers are applied with `applyResponseHeaders()` before returning
+- Internal headers (`x-workos-*`) are never exposed to the browser
+</Warning>
+
+## Redirect options
+
+The `handleAuthkitHeaders()` helper accepts redirect options:
+
+```ts
+handleAuthkitHeaders(request, headers, {
+  redirect: '/login',      // URL to redirect to (string or URL object)
+  redirectStatus: 307,     // 302 | 303 | 307 | 308
+});
+```
+
+Default redirect status codes:
+- `307` for GET and HEAD requests (preserves method)
+- `303` for POST, PUT, DELETE (changes to GET, prevents form resubmission)
+
+## Security considerations
+
+<Warning>
+The `redirect` option should only be used with trusted values. Never pass user-controlled input directly to `redirect` without validation, as this could enable open redirect attacks.
+</Warning>
+
+Safe redirect sources:
+- `authorizationUrl` from `authkit()` response
+- Hardcoded application paths
+- Validated and sanitized user input
+
+## Internal headers reference
+
+AuthKit uses internal headers to pass data between middleware and server components:
+
+**Request headers** (passed to server components, never sent to browser):
+
+| Header | Purpose |
+| --- | --- |
+| `x-workos-middleware` | Flag indicating AuthKit middleware is active |
+| `x-workos-session` | Encrypted session data |
+| `x-url` | Current request URL |
+| `x-redirect-uri` | OAuth callback URI |
+| `x-sign-up-paths` | Paths configured for sign-up flow |
+
+**Response headers** (safe to send to browser):
+
+| Header | Purpose |
+| --- | --- |
+| `Set-Cookie` | Session cookies (multiple cookies properly appended) |
+| `Cache-Control` | Caching directives (auto-set to `no-store` when cookies present) |
+| `Vary` | Cache variation keys (deduplicated when merging) |
+| `WWW-Authenticate` | Authentication challenge for 401 responses |
+| `Proxy-Authenticate` | Authentication challenge for proxy auth |
+| `Link` | Pagination, preload hints |
+| `x-middleware-cache` | Next.js middleware result caching |
+
+The `handleAuthkitHeaders()` helper ensures request headers are forwarded to your pages (so `withAuth()` works) while filtering out sensitive headers before sending to the browser.
+
+## Related resources
+
+- [Eager auth](/advanced/eager-auth) - Enable synchronous token access
+- [Custom flows](/advanced/custom-flows) - Implement custom authentication flows
+- [WorkOS client](/advanced/workos-client) - Access the WorkOS SDK directly

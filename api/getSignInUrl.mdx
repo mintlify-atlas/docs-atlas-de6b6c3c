@@ -1,0 +1,175 @@
+---
+title: getSignInUrl
+description: Generate a sign-in URL for redirecting users to WorkOS AuthKit
+---
+
+`getSignInUrl` generates a URL that redirects users to the WorkOS AuthKit sign-in page. This is typically used to create sign-in links or buttons in your application.
+
+## Usage
+
+```typescript
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+const signInUrl = await getSignInUrl();
+```
+
+## Signature
+
+```typescript
+async function getSignInUrl(options?: {
+  organizationId?: string;
+  loginHint?: string;
+  redirectUri?: string;
+  prompt?: 'consent';
+  state?: string;
+  returnTo?: string;
+}): Promise<string>
+```
+
+## Parameters
+
+<ParamField path="options" type="object" optional>
+  Configuration options for the sign-in URL.
+  
+  <Expandable title="properties">
+    <ParamField path="organizationId" type="string" optional>
+      The ID of the organization the user should sign in to. When provided, the user will be prompted to authenticate with that organization's configured identity provider.
+    </ParamField>
+    
+    <ParamField path="loginHint" type="string" optional>
+      Pre-fills the email field on the sign-in page with this value.
+    </ParamField>
+    
+    <ParamField path="redirectUri" type="string" optional>
+      The URI to redirect to after authentication. Overrides the default redirect URI configured in environment variables.
+    </ParamField>
+    
+    <ParamField path="prompt" type="'consent'" optional>
+      When set to `'consent'`, forces the user to re-authenticate even if they have an active session.
+    </ParamField>
+    
+    <ParamField path="state" type="string" optional>
+      Custom state data to pass through the authentication flow. The state will be available in the `handleAuth` callback. For complex data, serialize with `JSON.stringify()`.
+    </ParamField>
+    
+    <ParamField path="returnTo" type="string" optional>
+      The pathname to redirect the user to after signing in. This will be encoded and passed through the OAuth flow.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Returns
+
+<ResponseField name="url" type="string">
+  The complete URL to redirect the user to for signing in.
+</ResponseField>
+
+## Examples
+
+### Basic sign-in link
+
+```typescript
+import Link from 'next/link';
+import { getSignInUrl, withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function HomePage() {
+  const { user } = await withAuth();
+  
+  if (!user) {
+    const signInUrl = await getSignInUrl();
+    return <Link href={signInUrl}>Sign in</Link>;
+  }
+  
+  return <div>Welcome back!</div>;
+}
+```
+
+### Pre-filling the email
+
+```typescript
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function InvitePage({ email }: { email: string }) {
+  const signInUrl = await getSignInUrl({
+    loginHint: email,
+  });
+  
+  return (
+    <a href={signInUrl}>Sign in as {email}</a>
+  );
+}
+```
+
+### Organization-specific sign-in
+
+```typescript
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function OrgSignInPage({ orgId }: { orgId: string }) {
+  const signInUrl = await getSignInUrl({
+    organizationId: orgId,
+  });
+  
+  return (
+    <a href={signInUrl}>Sign in to your organization</a>
+  );
+}
+```
+
+### Passing custom state
+
+```typescript
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function PricingPage() {
+  const signInUrl = await getSignInUrl({
+    state: JSON.stringify({
+      teamId: 'team_123',
+      referrer: 'pricing-page',
+      plan: 'pro',
+    }),
+  });
+  
+  return <a href={signInUrl}>Sign in to upgrade</a>;
+}
+```
+
+### Custom return path
+
+```typescript
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function ProtectedPage() {
+  const signInUrl = await getSignInUrl({
+    returnTo: '/dashboard/settings',
+  });
+  
+  return (
+    <a href={signInUrl}>Sign in to access settings</a>
+  );
+}
+```
+
+### Force re-authentication
+
+```typescript
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function SecurityPage() {
+  // Forces user to re-authenticate even if they have an active session
+  const signInUrl = await getSignInUrl({
+    prompt: 'consent',
+  });
+  
+  return (
+    <a href={signInUrl}>Verify your identity</a>
+  );
+}
+```
+
+## Notes
+
+- The generated URL is specific to your WorkOS configuration and includes your client ID
+- Custom state is passed through the OAuth flow and available in the `handleAuth` callback
+- Use `returnTo` to send users back to a specific page after they sign in
+- The `loginHint` parameter improves UX by pre-filling the email field but doesn't force authentication with that email

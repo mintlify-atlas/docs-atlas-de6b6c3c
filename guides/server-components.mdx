@@ -1,0 +1,205 @@
+---
+title: Using AuthKit in server components
+description: Learn how to access user authentication data in Next.js server components with the withAuth function
+---
+
+Next.js server components provide a secure way to access user data on the server without exposing sensitive information to the client. The `withAuth` function retrieves the current user's session from the AuthKit middleware.
+
+## Basic usage
+
+Use `withAuth` to retrieve the current user's session in any server component:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function ProfilePage() {
+  const { user } = await withAuth();
+
+  if (!user) {
+    return <div>Not signed in</div>;
+  }
+
+  return (
+    <div>
+      <h1>Welcome, {user.firstName}</h1>
+      <p>Email: {user.email}</p>
+    </div>
+  );
+}
+```
+
+## Available session data
+
+The `withAuth` function returns an object containing:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `user` | `User \| null` | The authenticated user object |
+| `sessionId` | `string` | The current session identifier |
+| `organizationId` | `string` | Organization context (if applicable) |
+| `accessToken` | `string` | JWT access token for API calls |
+| `role` | `string` | User's role in the organization |
+| `roles` | `string[]` | Array of all user roles |
+| `permissions` | `string[]` | User's granted permissions |
+| `entitlements` | `string[]` | Active entitlements |
+| `featureFlags` | `string[]` | Enabled feature flags |
+| `impersonator` | `Impersonator` | Present when user is being impersonated |
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function DashboardPage() {
+  const { user, organizationId, role, permissions } = await withAuth();
+
+  if (!user) {
+    return <div>Please sign in</div>;
+  }
+
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>Organization: {organizationId}</p>
+      <p>Role: {role}</p>
+      <p>Permissions: {permissions?.join(', ')}</p>
+    </div>
+  );
+}
+```
+
+## Requiring authentication
+
+For pages that require authentication, use the `ensureSignedIn` option. This will automatically redirect unauthenticated users to AuthKit:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function ProtectedPage() {
+  // Automatically redirects if user is not signed in
+  const { user } = await withAuth({ ensureSignedIn: true });
+
+  // User is guaranteed to be defined here
+  return (
+    <div>
+      <h1>Protected content</h1>
+      <p>Hello, {user.firstName}!</p>
+    </div>
+  );
+}
+```
+
+<Note>
+When using `ensureSignedIn: true`, the `user` property is guaranteed to be defined. The function will redirect before returning if no user is authenticated.
+</Note>
+
+## Accessing the access token
+
+Use the access token to make authenticated API calls to your backend or third-party services:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function DataPage() {
+  const { accessToken } = await withAuth();
+
+  if (!accessToken) {
+    return <div>Not authenticated</div>;
+  }
+
+  const response = await fetch('https://api.example.com/data', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  const data = await response.json();
+
+  return <div>{JSON.stringify(data)}</div>;
+}
+```
+
+## Working with feature flags
+
+Access the user's enabled feature flags to conditionally render UI:
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function FeaturePage() {
+  const { user, featureFlags } = await withAuth();
+
+  if (!user) {
+    return <div>Please sign in</div>;
+  }
+
+  const hasNewFeature = featureFlags?.includes('new-feature');
+
+  return (
+    <div>
+      <h1>Features</h1>
+      {hasNewFeature && (
+        <div className="new-feature">
+          <h2>New Feature Available!</h2>
+          <p>You have access to our latest feature.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## Conditional rendering
+
+Create different views for authenticated and unauthenticated users:
+
+```tsx
+import Link from 'next/link';
+import { withAuth, getSignInUrl, getSignUpUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function HomePage() {
+  const { user } = await withAuth();
+
+  if (!user) {
+    const signInUrl = await getSignInUrl();
+    const signUpUrl = await getSignUpUrl();
+
+    return (
+      <div>
+        <h1>Welcome</h1>
+        <p>Please sign in to continue</p>
+        <Link href={signInUrl}>Sign in</Link>
+        <Link href={signUpUrl}>Sign up</Link>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h1>Welcome back, {user.firstName}!</h1>
+      <p>You're signed in as {user.email}</p>
+    </div>
+  );
+}
+```
+
+## Important considerations
+
+<Warning>
+The `withAuth` function requires the AuthKit middleware to be configured and running on the route. If you call `withAuth` on a route not covered by the middleware, you'll receive an error.
+</Warning>
+
+Make sure your middleware configuration covers all routes where you call `withAuth`:
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+export const config = { 
+  matcher: ['/', '/dashboard/:path*', '/profile/:path*'] 
+};
+```
+
+<Note>
+Do not wrap `withAuth` calls in try/catch blocks when using `ensureSignedIn: true`. Next.js redirects must be called outside try/catch blocks to function properly.
+</Note>

@@ -1,0 +1,169 @@
+---
+title: withAuth
+description: Retrieve the authenticated user session in server components
+---
+
+`withAuth` is a server-side function that retrieves the authenticated user's session information. It can be used in server components, server actions, and route handlers.
+
+## Usage
+
+```typescript
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function HomePage() {
+  const { user } = await withAuth();
+  
+  if (!user) {
+    return <div>Not signed in</div>;
+  }
+  
+  return <div>Welcome back, {user.firstName}!</div>;
+}
+```
+
+## Signature
+
+```typescript
+function withAuth(options?: { ensureSignedIn?: boolean }): Promise<UserInfo | NoUserInfo>
+function withAuth(options: { ensureSignedIn: true }): Promise<UserInfo>
+```
+
+## Parameters
+
+<ParamField path="options" type="object" optional>
+  Configuration options for the authentication check.
+  
+  <Expandable title="properties">
+    <ParamField path="ensureSignedIn" type="boolean" default="false">
+      When `true`, redirects unauthenticated users to AuthKit. When `false`, returns `{ user: null }` for unauthenticated users.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Returns
+
+<ResponseField name="user" type="User | null">
+  The authenticated user object, or `null` if not authenticated.
+</ResponseField>
+
+<ResponseField name="sessionId" type="string | undefined">
+  The unique session identifier.
+</ResponseField>
+
+<ResponseField name="organizationId" type="string | undefined">
+  The ID of the user's current organization context.
+</ResponseField>
+
+<ResponseField name="role" type="string | undefined">
+  The user's role in the current organization.
+</ResponseField>
+
+<ResponseField name="roles" type="string[] | undefined">
+  Array of all roles assigned to the user.
+</ResponseField>
+
+<ResponseField name="permissions" type="string[] | undefined">
+  Array of permissions granted to the user.
+</ResponseField>
+
+<ResponseField name="entitlements" type="string[] | undefined">
+  Array of entitlements available to the user.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="string[] | undefined">
+  Array of enabled feature flags for the user.
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator | undefined">
+  Information about the impersonator, if the user is being impersonated.
+  
+  <Expandable title="properties">
+    <ResponseField name="email" type="string">
+      Email of the impersonator.
+    </ResponseField>
+    <ResponseField name="reason" type="string | null">
+      Reason for impersonation.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="accessToken" type="string | undefined">
+  JWT access token for the authenticated session.
+</ResponseField>
+
+## Examples
+
+### Basic usage
+
+```typescript
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function ProfilePage() {
+  const { user } = await withAuth();
+  
+  return (
+    <div>
+      {user ? (
+        <p>Email: {user.email}</p>
+      ) : (
+        <p>Please sign in</p>
+      )}
+    </div>
+  );
+}
+```
+
+### Requiring authentication
+
+```typescript
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function DashboardPage() {
+  // Automatically redirects to AuthKit if not signed in
+  const { user } = await withAuth({ ensureSignedIn: true });
+  
+  return <div>Welcome to your dashboard, {user.firstName}!</div>;
+}
+```
+
+### Accessing feature flags
+
+```typescript
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function HomePage() {
+  const { featureFlags } = await withAuth();
+  
+  const hasNewFeature = featureFlags?.includes('new-feature');
+  
+  return (
+    <div>
+      {hasNewFeature && <NewFeatureComponent />}
+    </div>
+  );
+}
+```
+
+### Using in a server action
+
+```typescript
+'use server';
+
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export async function updateProfile(formData: FormData) {
+  const { user } = await withAuth({ ensureSignedIn: true });
+  
+  // Update user profile logic
+  await database.updateUser(user.id, {
+    name: formData.get('name'),
+  });
+}
+```
+
+## Notes
+
+- `withAuth` requires the AuthKit middleware to be configured and running on the route where it's called
+- When `ensureSignedIn` is `true`, the function will redirect unauthenticated users and never return `null`
+- The access token is a JWT that can be used for authentication with external services
+- Do not wrap `withAuth({ ensureSignedIn: true })` in a try/catch block, as redirects in Next.js must be called outside try/catch blocks

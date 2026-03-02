@@ -1,0 +1,282 @@
+---
+title: getWorkOS
+description: Get the configured WorkOS SDK client instance
+---
+
+`getWorkOS` returns a singleton instance of the WorkOS SDK client, pre-configured with your API key and environment settings. This is useful for accessing WorkOS APIs directly for advanced use cases.
+
+## Usage
+
+```typescript
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+const workos = getWorkOS();
+```
+
+## Signature
+
+```typescript
+function getWorkOS(): WorkOS
+```
+
+## Parameters
+
+This function takes no parameters.
+
+## Returns
+
+<ResponseField name="workos" type="WorkOS">
+  The configured WorkOS SDK instance with access to all WorkOS APIs.
+  
+  <Expandable title="Available APIs">
+    <ResponseField name="userManagement" type="UserManagement">
+      User management APIs for authentication, users, and sessions.
+    </ResponseField>
+    
+    <ResponseField name="organizations" type="Organizations">
+      Organization management APIs.
+    </ResponseField>
+    
+    <ResponseField name="directorySync" type="DirectorySync">
+      Directory sync APIs for SCIM provisioning.
+    </ResponseField>
+    
+    <ResponseField name="sso" type="SSO">
+      Single sign-on APIs.
+    </ResponseField>
+    
+    <ResponseField name="mfa" type="MFA">
+      Multi-factor authentication APIs.
+    </ResponseField>
+    
+    <ResponseField name="passwordless" type="Passwordless">
+      Passwordless authentication APIs.
+    </ResponseField>
+    
+    <ResponseField name="auditLogs" type="AuditLogs">
+      Audit log APIs.
+    </ResponseField>
+    
+    <ResponseField name="apiKeys" type="ApiKeys">
+      API key management APIs.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Listing organizations
+
+```typescript
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function getOrganizations() {
+  const workos = getWorkOS();
+  
+  const organizations = await workos.organizations.listOrganizations({
+    limit: 10,
+  });
+  
+  return organizations.data;
+}
+```
+
+### Creating a new user
+
+```typescript
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function createUser(email: string, password: string) {
+  const workos = getWorkOS();
+  
+  const user = await workos.userManagement.createUser({
+    email,
+    password,
+    emailVerified: false,
+  });
+  
+  return user;
+}
+```
+
+### Sending a magic link
+
+```typescript
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function sendMagicLink(email: string) {
+  const workos = getWorkOS();
+  
+  await workos.userManagement.sendMagicAuthCode({
+    email,
+  });
+  
+  return { success: true };
+}
+```
+
+### Getting organization details
+
+```typescript
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function getOrganization(organizationId: string) {
+  const workos = getWorkOS();
+  
+  const organization = await workos.organizations.getOrganization({
+    organizationId,
+  });
+  
+  return {
+    id: organization.id,
+    name: organization.name,
+    domains: organization.domains,
+  };
+}
+```
+
+### Managing organization memberships
+
+```typescript
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function addUserToOrganization(
+  userId: string,
+  organizationId: string,
+  roleSlug?: string
+) {
+  const workos = getWorkOS();
+  
+  const membership = await workos.userManagement.createOrganizationMembership({
+    userId,
+    organizationId,
+    roleSlug,
+  });
+  
+  return membership;
+}
+```
+
+### Updating user metadata
+
+```typescript
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function updateUserMetadata(
+  userId: string,
+  metadata: Record<string, unknown>
+) {
+  const workos = getWorkOS();
+  
+  const user = await workos.userManagement.updateUser({
+    userId,
+    firstName: metadata.firstName as string,
+    lastName: metadata.lastName as string,
+  });
+  
+  return user;
+}
+```
+
+### Custom email verification
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { getWorkOS, saveSession } from '@workos-inc/authkit-nextjs';
+
+export async function POST(req: NextRequest) {
+  const { code } = await req.json();
+  const workos = getWorkOS();
+  
+  // Verify email with WorkOS
+  const authResponse = await workos.userManagement.authenticateWithEmailVerification({
+    clientId: process.env.WORKOS_CLIENT_ID!,
+    code,
+  });
+  
+  // Save the session
+  await saveSession(authResponse, req);
+  
+  return NextResponse.json({ success: true });
+}
+```
+
+### Querying directory sync data
+
+```typescript
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function getDirectoryUsers(directoryId: string) {
+  const workos = getWorkOS();
+  
+  const users = await workos.directorySync.listUsers({
+    directory: directoryId,
+    limit: 100,
+  });
+  
+  return users.data;
+}
+```
+
+### Creating audit log events
+
+```typescript
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function logEvent(
+  organizationId: string,
+  action: string,
+  actorId: string
+) {
+  const workos = getWorkOS();
+  
+  await workos.auditLogs.createEvent({
+    organizationId,
+    event: {
+      action,
+      occurredAt: new Date().toISOString(),
+      actor: {
+        id: actorId,
+        type: 'user',
+      },
+    },
+  });
+}
+```
+
+### Checking SSO connection
+
+```typescript
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function checkSSOConnection(organizationId: string) {
+  const workos = getWorkOS();
+  
+  const connections = await workos.sso.listConnections({
+    organizationId,
+  });
+  
+  return {
+    hasSSOEnabled: connections.data.length > 0,
+    connections: connections.data,
+  };
+}
+```
+
+## Configuration
+
+The WorkOS instance is configured using environment variables:
+
+- `WORKOS_API_KEY` - Your WorkOS API key (required)
+- `WORKOS_API_HOSTNAME` - Custom API hostname (optional, defaults to `api.workos.com`)
+- `WORKOS_API_HTTPS` - Whether to use HTTPS (optional, defaults to `true`)
+- `WORKOS_API_PORT` - Custom port (optional)
+
+## Notes
+
+- The WorkOS instance is created lazily and cached as a singleton
+- The same instance is reused across all calls to `getWorkOS()`
+- The instance includes app info headers identifying it as `authkit/nextjs`
+- All WorkOS SDK methods are available through this instance
+- Use this for advanced use cases not covered by helper functions like `withAuth`, `handleAuth`, etc.
+- The full WorkOS Node SDK documentation is available at [workos.com/docs](https://workos.com/docs)

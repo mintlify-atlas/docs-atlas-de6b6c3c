@@ -1,0 +1,287 @@
+---
+title: "useAuth"
+description: "React hook that provides access to authentication state and methods"
+---
+
+`useAuth` is a client-side React hook that provides access to the authentication context created by `AuthKitProvider`. It returns the current user, session data, and methods for authentication operations.
+
+## Usage
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs';
+
+export function UserProfile() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  if (!user) {
+    return <div>Not signed in</div>;
+  }
+
+  return <div>Welcome, {user.email}</div>;
+}
+```
+
+## Signature
+
+```typescript
+function useAuth(options?: { ensureSignedIn?: boolean }): AuthContextType;
+
+function useAuth(options: { ensureSignedIn: true }): 
+  AuthContextType & (
+    | { loading: true; user: User | null }
+    | { loading: false; user: User }
+  );
+```
+
+## Parameters
+
+<ParamField path="options.ensureSignedIn" type="boolean" default="false">
+  When `true`, the hook will automatically trigger authentication if no user is signed in. This narrows the TypeScript type to guarantee a `User` object when `loading` is `false`.
+
+  ```tsx
+  const { user, loading } = useAuth({ ensureSignedIn: true });
+
+  if (!loading) {
+    // TypeScript knows user is not null here
+    console.log(user.email);
+  }
+  ```
+</ParamField>
+
+## Return value
+
+<ResponseField name="user" type="User | null">
+  The authenticated user object from WorkOS, or `null` if not authenticated.
+
+  ```typescript
+  interface User {
+    id: string;
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    emailVerified: boolean;
+    profilePictureUrl?: string;
+    createdAt: string;
+    updatedAt: string;
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="sessionId" type="string | undefined">
+  The current session ID.
+</ResponseField>
+
+<ResponseField name="organizationId" type="string | undefined">
+  The ID of the organization the user is currently in.
+</ResponseField>
+
+<ResponseField name="role" type="string | undefined">
+  The user's role in the current organization.
+</ResponseField>
+
+<ResponseField name="roles" type="string[] | undefined">
+  Array of all roles assigned to the user.
+</ResponseField>
+
+<ResponseField name="permissions" type="string[] | undefined">
+  Array of permissions granted to the user.
+</ResponseField>
+
+<ResponseField name="entitlements" type="string[] | undefined">
+  Array of entitlements for the user.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="string[] | undefined">
+  Array of feature flags enabled for the user.
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator | undefined">
+  Information about the admin impersonating this user, if applicable.
+
+  ```typescript
+  interface Impersonator {
+    email: string;
+    reason: string | null;
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="loading" type="boolean">
+  Indicates whether authentication data is being loaded.
+</ResponseField>
+
+<ResponseField name="getAuth" type="(options?: { ensureSignedIn?: boolean }) => Promise<void>">
+  Fetches the latest authentication state from the server. Useful for manually refreshing user data.
+
+  ```tsx
+  const { getAuth } = useAuth();
+
+  const handleRefresh = async () => {
+    await getAuth();
+  };
+  ```
+</ResponseField>
+
+<ResponseField name="refreshAuth" type="(options?: { ensureSignedIn?: boolean; organizationId?: string }) => Promise<void | { error: string }>">
+  Refreshes the authentication session by exchanging the refresh token for a new access token. Optionally switches to a different organization.
+
+  ```tsx
+  const { refreshAuth } = useAuth();
+
+  const handleSwitch = async (orgId: string) => {
+    const result = await refreshAuth({ organizationId: orgId });
+    if (result && 'error' in result) {
+      console.error(result.error);
+    }
+  };
+  ```
+</ResponseField>
+
+<ResponseField name="signOut" type="(options?: { returnTo?: string }) => Promise<void>">
+  Signs out the current user and optionally redirects to a specific URL.
+
+  ```tsx
+  const { signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOut({ returnTo: '/goodbye' });
+  };
+  ```
+</ResponseField>
+
+<ResponseField name="switchToOrganization" type="(organizationId: string, options?: SwitchToOrganizationOptions) => Promise<Omit<UserInfo, 'accessToken'> | { error: string }>">
+  Switches the user's active organization.
+
+  ```tsx
+  const { switchToOrganization } = useAuth();
+
+  const handleSwitch = async (orgId: string) => {
+    const result = await switchToOrganization(orgId, {
+      revalidationStrategy: 'none'
+    });
+
+    if ('error' in result) {
+      console.error(result.error);
+    }
+  };
+  ```
+</ResponseField>
+
+## Examples
+
+### Conditional rendering based on auth state
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs';
+
+export function Dashboard() {
+  const { user, loading, organizationId } = useAuth();
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (!user) {
+    return <SignInPrompt />;
+  }
+
+  return (
+    <div>
+      <h1>Welcome, {user.firstName || user.email}</h1>
+      {organizationId && <OrganizationView orgId={organizationId} />}
+    </div>
+  );
+}
+```
+
+### Using ensureSignedIn for protected components
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs';
+
+export function ProtectedComponent() {
+  const { user, loading } = useAuth({ ensureSignedIn: true });
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  // TypeScript knows user is not null here
+  return <div>Hello, {user.email}</div>;
+}
+```
+
+### Permission-based rendering
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs';
+
+export function AdminPanel() {
+  const { permissions, loading } = useAuth();
+
+  if (loading) return <div>Loading...</div>;
+
+  const canManageUsers = permissions?.includes('users:manage');
+
+  return (
+    <div>
+      <h1>Admin Panel</h1>
+      {canManageUsers && <UserManagement />}
+    </div>
+  );
+}
+```
+
+### Manual sign out
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs';
+
+export function SignOutButton() {
+  const { signOut } = useAuth();
+
+  return (
+    <button onClick={() => signOut({ returnTo: '/' })}>
+      Sign Out
+    </button>
+  );
+}
+```
+
+## Important notes
+
+<Warning>
+  This hook must be used within a component that is a child of `AuthKitProvider`. It will throw an error if used outside the provider.
+</Warning>
+
+<Info>
+  The hook is client-side only. Use the `withAuth` server function for server components and API routes.
+</Info>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="AuthKitProvider" icon="react" href="/api/AuthKitProvider">
+    Set up the authentication provider
+  </Card>
+  <Card title="useAccessToken" icon="key" href="/api/useAccessToken">
+    Get the user's access token
+  </Card>
+  <Card title="withAuth" icon="server" href="/api/withAuth">
+    Server-side authentication
+  </Card>
+</CardGroup>

@@ -1,0 +1,159 @@
+---
+title: "AuthKitProvider"
+description: "React context provider that manages authentication state and provides auth methods to your application"
+---
+
+`AuthKitProvider` is a client-side React component that wraps your application and provides authentication context to all child components. It manages user state, session data, and provides methods for authentication operations.
+
+## Usage
+
+```tsx
+import { AuthKitProvider } from '@workos-inc/authkit-nextjs';
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>
+        <AuthKitProvider>
+          {children}
+        </AuthKitProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+## Props
+
+<ParamField path="children" type="ReactNode" required>
+  The child components that will have access to the authentication context.
+</ParamField>
+
+<ParamField path="onSessionExpired" type="false | (() => void)">
+  Customize what happens when a session expires. By default, the entire page will be reloaded. Pass `false` to disable expired session checks.
+
+  ```tsx
+  <AuthKitProvider
+    onSessionExpired={() => {
+      // Custom handling
+      console.log('Session expired');
+      window.location.href = '/login';
+    }}
+  >
+    {children}
+  </AuthKitProvider>
+  ```
+</ParamField>
+
+<ParamField path="initialAuth" type="Omit<UserInfo | NoUserInfo, 'accessToken'>">
+  Initial auth data from the server. If provided, the provider will skip the initial client-side fetch, improving performance and reducing loading states.
+
+  ```tsx
+  import { withAuth } from '@workos-inc/authkit-nextjs';
+
+  export default async function RootLayout({ children }) {
+    const { user, sessionId, organizationId } = await withAuth();
+
+    return (
+      <html lang="en">
+        <body>
+          <AuthKitProvider initialAuth={{ user, sessionId, organizationId }}>
+            {children}
+          </AuthKitProvider>
+        </body>
+      </html>
+    );
+  }
+  ```
+</ParamField>
+
+## Context value
+
+The provider exposes the following values through the `useAuth` hook:
+
+<ResponseField name="user" type="User | null">
+  The authenticated user object, or `null` if not authenticated.
+</ResponseField>
+
+<ResponseField name="sessionId" type="string | undefined">
+  The current session ID.
+</ResponseField>
+
+<ResponseField name="organizationId" type="string | undefined">
+  The ID of the organization the user is currently in.
+</ResponseField>
+
+<ResponseField name="role" type="string | undefined">
+  The user's role in the current organization.
+</ResponseField>
+
+<ResponseField name="roles" type="string[] | undefined">
+  Array of all roles assigned to the user.
+</ResponseField>
+
+<ResponseField name="permissions" type="string[] | undefined">
+  Array of permissions granted to the user.
+</ResponseField>
+
+<ResponseField name="entitlements" type="string[] | undefined">
+  Array of entitlements for the user.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="string[] | undefined">
+  Array of feature flags enabled for the user.
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator | undefined">
+  Information about the admin impersonating this user, if applicable.
+</ResponseField>
+
+<ResponseField name="loading" type="boolean">
+  Indicates whether authentication data is being loaded.
+</ResponseField>
+
+<ResponseField name="getAuth" type="(options?: { ensureSignedIn?: boolean }) => Promise<void>">
+  Fetches the latest authentication state from the server.
+</ResponseField>
+
+<ResponseField name="refreshAuth" type="(options?: { ensureSignedIn?: boolean; organizationId?: string }) => Promise<void | { error: string }>">
+  Refreshes the authentication session, optionally switching to a different organization.
+</ResponseField>
+
+<ResponseField name="signOut" type="(options?: { returnTo?: string }) => Promise<void>">
+  Signs out the current user and optionally redirects to a specific URL.
+</ResponseField>
+
+<ResponseField name="switchToOrganization" type="(organizationId: string, options?: SwitchToOrganizationOptions) => Promise<Omit<UserInfo, 'accessToken'> | { error: string }>">
+  Switches the user's active organization.
+</ResponseField>
+
+## Session expiration handling
+
+The provider automatically monitors session validity when the browser tab becomes visible or gains focus. If a session has expired, it will:
+
+1. Call the `onSessionExpired` callback if provided
+2. Otherwise, reload the page (default behavior)
+3. Do nothing if `onSessionExpired={false}`
+
+This ensures users are redirected to sign in when their session expires in another tab.
+
+## Best practices
+
+<Card title="Use initialAuth for better performance" icon="rocket">
+  Pass server-side authentication data to `initialAuth` to avoid an extra client-side fetch on page load.
+</Card>
+
+<Card title="Disable session checks cautiously" icon="shield-exclamation">
+  Only set `onSessionExpired={false}` if you have custom session management. The default behavior protects against stale sessions.
+</Card>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="useAuth" icon="react" href="/api/useAuth">
+    Access the authentication context
+  </Card>
+  <Card title="useAccessToken" icon="key" href="/api/useAccessToken">
+    Get the user's access token
+  </Card>
+</CardGroup>

@@ -1,0 +1,179 @@
+---
+title: handleAuth
+description: Create an authentication callback route handler for WorkOS AuthKit
+---
+
+`handleAuth` creates a route handler function that processes OAuth callback requests from WorkOS AuthKit. It exchanges authorization codes for user sessions and manages session cookies.
+
+## Usage
+
+```typescript
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth();
+```
+
+## Signature
+
+```typescript
+function handleAuth(options?: HandleAuthOptions): (request: NextRequest) => Promise<Response>
+```
+
+## Parameters
+
+<ParamField path="options" type="object" optional>
+  Configuration options for the authentication callback handler.
+  
+  <Expandable title="properties">
+    <ParamField path="returnPathname" type="string" default="/">
+      The pathname to redirect users to after successful authentication.
+    </ParamField>
+    
+    <ParamField path="baseURL" type="string" optional>
+      The base URL to use for redirects. Required when running in containers like Docker where the hostname differs from the request hostname.
+    </ParamField>
+    
+    <ParamField path="onSuccess" type="function" optional>
+      Callback function invoked after successful authentication. Receives authentication data for side effects like persisting tokens.
+      
+      ```typescript
+      (data: {
+        user: User;
+        accessToken: string;
+        refreshToken: string;
+        impersonator?: Impersonator;
+        oauthTokens?: OauthTokens;
+        authenticationMethod?: string;
+        organizationId?: string;
+        state?: string;
+      }) => void | Promise<void>
+      ```
+    </ParamField>
+    
+    <ParamField path="onError" type="function" optional>
+      Callback function to handle authentication errors. Must return a Response object.
+      
+      ```typescript
+      (params: {
+        error?: unknown;
+        request: NextRequest;
+      }) => Response | Promise<Response>
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Returns
+
+Returns a route handler function that accepts a `NextRequest` and returns a `Promise<Response>`.
+
+## Examples
+
+### Basic callback route
+
+```typescript
+// app/auth/callback/route.ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth();
+```
+
+### Custom redirect path
+
+```typescript
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  returnPathname: '/dashboard',
+});
+```
+
+### Persisting OAuth tokens
+
+```typescript
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, oauthTokens, authenticationMethod, organizationId }) => {
+    // Save OAuth tokens from upstream provider
+    if (oauthTokens) {
+      await database.saveTokens(user.id, oauthTokens);
+    }
+    
+    // Track authentication method
+    if (authenticationMethod) {
+      await analytics.track('user_authenticated', {
+        userId: user.id,
+        method: authenticationMethod,
+        organizationId,
+      });
+    }
+  },
+});
+```
+
+### Handling custom state
+
+```typescript
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, state }) => {
+    // Parse custom state passed through the auth flow
+    const customData = state ? JSON.parse(state) : null;
+    
+    if (customData?.teamId) {
+      await addUserToTeam(user.id, customData.teamId);
+    }
+    
+    if (customData?.referrer) {
+      await analytics.track('sign_in_completed', {
+        userId: user.id,
+        referrer: customData.referrer,
+      });
+    }
+  },
+});
+```
+
+### Docker deployments
+
+```typescript
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  baseURL: 'https://app.example.com',
+});
+```
+
+### Custom error handling
+
+```typescript
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+import { NextResponse } from 'next/server';
+
+export const GET = handleAuth({
+  onError: async ({ error, request }) => {
+    console.error('Authentication error:', error);
+    
+    // Log to monitoring service
+    await monitoring.logError('auth_callback_failed', {
+      error,
+      url: request.url,
+    });
+    
+    // Return custom error response
+    return NextResponse.redirect(
+      new URL('/auth/error', request.url)
+    );
+  },
+});
+```
+
+## Notes
+
+- The callback route URL must match the redirect URI configured in your WorkOS dashboard
+- The callback route URL must also match the `WORKOS_REDIRECT_URI` environment variable
+- `authenticationMethod` is only available during the initial authentication callback, not on session refreshes
+- When using custom state, remember to serialize complex data with `JSON.stringify()` when creating auth URLs
+- The `baseURL` option is particularly useful for preview deployments and containerized environments

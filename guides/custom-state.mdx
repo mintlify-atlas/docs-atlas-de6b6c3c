@@ -1,0 +1,468 @@
+---
+title: Passing custom state through authentication
+description: Learn how to pass custom data through the OAuth authentication flow to maintain context
+---
+
+The `state` parameter allows you to pass custom data through the authentication flow. This is useful for preserving context about what the user was doing before signing in or for attribution tracking.
+
+## Basic usage
+
+Pass custom state when generating authentication URLs:
+
+```ts
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function LoginButton() {
+  const signInUrl = await getSignInUrl({
+    state: JSON.stringify({
+      redirectTo: '/dashboard',
+      source: 'pricing-page',
+    }),
+  });
+
+  return <a href={signInUrl}>Sign in</a>;
+}
+```
+
+<Note>
+The `state` parameter is an opaque string as defined by OAuth 2.0 (RFC 6749). To pass structured data, serialize it using `JSON.stringify()` and parse it with `JSON.parse()` in the callback.
+</Note>
+
+## Receiving state in the callback
+
+Access the state data in your callback handler using the `onSuccess` callback:
+
+```ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, state }) => {
+    // Parse the state string back to an object
+    const customData = state ? JSON.parse(state) : null;
+
+    if (customData?.redirectTo) {
+      console.log('User should be redirected to:', customData.redirectTo);
+    }
+
+    if (customData?.source) {
+      await trackSignIn(user.id, customData.source);
+    }
+  },
+});
+```
+
+## Common use cases
+
+### Tracking referral sources
+
+Track where users came from when they signed up:
+
+```tsx
+import { getSignUpUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function PricingPage() {
+  const signUpUrl = await getSignUpUrl({
+    state: JSON.stringify({
+      referrer: 'pricing-page',
+      plan: 'pro',
+      campaign: 'summer-sale',
+    }),
+  });
+
+  return (
+    <div>
+      <h1>Pro Plan</h1>
+      <a href={signUpUrl}>Start your free trial</a>
+    </div>
+  );
+}
+```
+
+Handle the state in your callback:
+
+```ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, state }) => {
+    const data = state ? JSON.parse(state) : null;
+
+    if (data) {
+      await analytics.track('user_signed_up', {
+        userId: user.id,
+        referrer: data.referrer,
+        plan: data.plan,
+        campaign: data.campaign,
+        timestamp: Date.now(),
+      });
+    }
+  },
+});
+```
+
+### Adding users to teams
+
+Automatically add users to a team after signing up:
+
+```tsx
+import { getSignUpUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function TeamInvite({ 
+  params 
+}: { 
+  params: { inviteCode: string } 
+}) {
+  const teamId = await getTeamIdFromInvite(params.inviteCode);
+  
+  const signUpUrl = await getSignUpUrl({
+    state: JSON.stringify({
+      teamId,
+      inviteCode: params.inviteCode,
+    }),
+  });
+
+  return (
+    <div>
+      <h1>Join the team</h1>
+      <a href={signUpUrl}>Create account</a>
+    </div>
+  );
+}
+```
+
+```ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, state }) => {
+    const data = state ? JSON.parse(state) : null;
+
+    if (data?.teamId) {
+      await addUserToTeam(user.id, data.teamId);
+      await markInviteAsAccepted(data.inviteCode);
+    }
+  },
+  returnPathname: '/team/welcome',
+});
+```
+
+### Preserving page context
+
+Remember what the user was doing before authentication:
+
+```tsx
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function CheckoutPage({ 
+  params 
+}: { 
+  params: { productId: string } 
+}) {
+  const signInUrl = await getSignInUrl({
+    state: JSON.stringify({
+      action: 'checkout',
+      productId: params.productId,
+      returnTo: `/checkout/${params.productId}`,
+    }),
+  });
+
+  return (
+    <div>
+      <h1>Complete your purchase</h1>
+      <p>Please sign in to continue</p>
+      <a href={signInUrl}>Sign in</a>
+    </div>
+  );
+}
+```
+
+```ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, state }) => {
+    const data = state ? JSON.parse(state) : null;
+
+    if (data?.action === 'checkout' && data?.productId) {
+      // Pre-populate the cart for the user
+      await addToCart(user.id, data.productId);
+      
+      // Log the conversion
+      await analytics.track('checkout_after_signin', {
+        userId: user.id,
+        productId: data.productId,
+      });
+    }
+  },
+});
+```
+
+### Feature activation tracking
+
+Track which features prompted users to sign up:
+
+```tsx
+import { getSignUpUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function FeaturePage() {
+  const signUpUrl = await getSignUpUrl({
+    state: JSON.stringify({
+      feature: 'advanced-analytics',
+      featurePage: '/features/analytics',
+    }),
+  });
+
+  return (
+    <div>
+      <h1>Advanced Analytics</h1>
+      <p>Sign up to unlock this feature</p>
+      <a href={signUpUrl}>Get started</a>
+    </div>
+  );
+}
+```
+
+```ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, state }) => {
+    const data = state ? JSON.parse(state) : null;
+
+    if (data?.feature) {
+      await trackFeatureActivation(user.id, data.feature);
+      
+      // Enable trial access to the feature
+      await enableFeatureTrial(user.id, data.feature);
+    }
+  },
+});
+```
+
+## Combining state with returnPathname
+
+Use both `state` for data and `returnTo` for the redirect path:
+
+```tsx
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function ArticlePage({ 
+  params 
+}: { 
+  params: { slug: string } 
+}) {
+  const signInUrl = await getSignInUrl({
+    state: JSON.stringify({
+      articleSlug: params.slug,
+      source: 'premium-content',
+    }),
+    returnTo: `/articles/${params.slug}`,
+  });
+
+  return (
+    <div>
+      <h1>Premium Article</h1>
+      <p>Sign in to read this article</p>
+      <a href={signInUrl}>Sign in</a>
+    </div>
+  );
+}
+```
+
+```ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, state }) => {
+    const data = state ? JSON.parse(state) : null;
+
+    if (data?.articleSlug) {
+      // Track which article prompted the sign-in
+      await trackArticleView(user.id, data.articleSlug, data.source);
+    }
+  },
+  // User is automatically redirected to the article
+});
+```
+
+## Dynamic sign-in buttons
+
+Create reusable sign-in components that accept custom state:
+
+```tsx
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+interface SignInButtonProps {
+  source: string;
+  campaign?: string;
+  metadata?: Record<string, any>;
+}
+
+export default async function SignInButton({ 
+  source, 
+  campaign,
+  metadata 
+}: SignInButtonProps) {
+  const signInUrl = await getSignInUrl({
+    state: JSON.stringify({
+      source,
+      campaign,
+      ...metadata,
+      timestamp: Date.now(),
+    }),
+  });
+
+  return <a href={signInUrl}>Sign in</a>;
+}
+```
+
+Use it across your application:
+
+```tsx
+import SignInButton from '@/components/SignInButton';
+
+export default function HomePage() {
+  return (
+    <div>
+      <SignInButton 
+        source="hero-cta" 
+        campaign="homepage-v2" 
+      />
+    </div>
+  );
+}
+
+export function PricingPage() {
+  return (
+    <div>
+      <SignInButton 
+        source="pricing-page" 
+        metadata={{ plan: 'enterprise' }}
+      />
+    </div>
+  );
+}
+```
+
+## State size limits
+
+<Warning>
+The state parameter has a size limit (typically around 2000 characters). Keep your state data concise. If you need to pass large amounts of data, consider storing it server-side and passing only an identifier.
+</Warning>
+
+For large data, use a reference ID:
+
+```tsx
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+
+export default async function ComplexFlow() {
+  // Store complex data server-side
+  const flowId = await storeFlowData({
+    steps: [...],
+    selections: {...},
+    largeObject: {...},
+  });
+
+  const signInUrl = await getSignInUrl({
+    state: JSON.stringify({ flowId }),
+  });
+
+  return <a href={signInUrl}>Continue</a>;
+}
+```
+
+```ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, state }) => {
+    const data = state ? JSON.parse(state) : null;
+
+    if (data?.flowId) {
+      // Retrieve the stored data
+      const flowData = await getFlowData(data.flowId);
+      await processUserFlow(user.id, flowData);
+    }
+  },
+});
+```
+
+## Best practices
+
+<Tip>
+**State data guidelines:**
+
+- Keep state data small (under 1KB when possible)
+- Only include essential information
+- Don't include sensitive data (use encrypted IDs if needed)
+- Always validate and sanitize state data in the callback
+- Use TypeScript types to ensure consistency
+</Tip>
+
+<Note>
+The state parameter persists through the entire OAuth flow, even if users navigate through multiple AuthKit screens.
+</Note>
+
+## TypeScript example
+
+Define types for your state data:
+
+```ts
+// types/auth.ts
+export interface SignInState {
+  source: string;
+  campaign?: string;
+  referrer?: string;
+  returnTo?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface SignUpState {
+  source: string;
+  teamId?: string;
+  inviteCode?: string;
+  plan?: string;
+}
+```
+
+```tsx
+import { getSignInUrl } from '@workos-inc/authkit-nextjs';
+import type { SignInState } from '@/types/auth';
+
+export default async function SignInButton() {
+  const state: SignInState = {
+    source: 'navbar',
+    campaign: 'spring-2024',
+    returnTo: '/dashboard',
+  };
+
+  const signInUrl = await getSignInUrl({
+    state: JSON.stringify(state),
+  });
+
+  return <a href={signInUrl}>Sign in</a>;
+}
+```
+
+```ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+import type { SignInState } from '@/types/auth';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, state }) => {
+    let data: SignInState | null = null;
+
+    if (state) {
+      try {
+        data = JSON.parse(state) as SignInState;
+      } catch (error) {
+        console.error('Failed to parse state:', error);
+      }
+    }
+
+    if (data) {
+      await trackSignIn(user.id, data);
+    }
+  },
+});
+```

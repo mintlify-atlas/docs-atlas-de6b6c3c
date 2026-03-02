@@ -1,0 +1,482 @@
+---
+title: "WorkOS client"
+description: "Access the WorkOS SDK directly for advanced functionality beyond the AuthKit helpers"
+---
+
+The `getWorkOS()` function provides direct access to the underlying WorkOS SDK client. This is useful for advanced use cases and functionality not covered by the AuthKit helper methods.
+
+## When to use the WorkOS client
+
+Use direct SDK access when:
+
+- Managing organizations, directory sync, or SSO connections
+- Accessing audit logs or webhooks
+- Implementing custom authentication flows
+- Using WorkOS features beyond basic authentication
+- Integrating with other WorkOS products
+
+For standard authentication needs, use the AuthKit helpers instead.
+
+## Getting the client
+
+Import and call `getWorkOS()` to access the configured WorkOS client:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+const workos = getWorkOS();
+```
+
+The client is automatically configured with:
+
+- API key from `WORKOS_API_KEY`
+- API hostname from `WORKOS_API_HOSTNAME` (default: `api.workos.com`)
+- HTTPS setting from `WORKOS_API_HTTPS` (default: `true`)
+- Port from `WORKOS_API_PORT` (optional)
+- Library identification for debugging
+
+## Organization management
+
+Manage organizations for your application:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+const workos = getWorkOS();
+
+// List organizations
+const organizations = await workos.organizations.listOrganizations({
+  limit: 10,
+  order: 'desc',
+});
+
+// Get a specific organization
+const organization = await workos.organizations.getOrganization('org_123');
+
+// Create an organization
+const newOrg = await workos.organizations.createOrganization({
+  name: 'Acme Corp',
+  domains: ['acme.com'],
+});
+
+// Update an organization
+const updated = await workos.organizations.updateOrganization('org_123', {
+  name: 'Acme Corporation',
+});
+
+// Delete an organization
+await workos.organizations.deleteOrganization('org_123');
+```
+
+## User management
+
+Perform advanced user operations:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+const workos = getWorkOS();
+
+// List users
+const users = await workos.userManagement.listUsers({
+  limit: 10,
+  organizationId: 'org_123',
+});
+
+// Get user by ID
+const user = await workos.userManagement.getUser('user_123');
+
+// Update user
+const updated = await workos.userManagement.updateUser({
+  userId: 'user_123',
+  firstName: 'Jane',
+  lastName: 'Doe',
+});
+
+// Delete user
+await workos.userManagement.deleteUser('user_123');
+
+// Send password reset email
+await workos.userManagement.sendPasswordResetEmail({
+  email: 'user@example.com',
+  passwordResetUrl: 'https://example.com/reset-password',
+});
+```
+
+## Authentication methods
+
+Implement custom authentication flows:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+const workos = getWorkOS();
+
+// Email verification
+const authResponse = await workos.userManagement.authenticateWithEmailVerification({
+  clientId: process.env.WORKOS_CLIENT_ID!,
+  code: 'verification_code_123',
+});
+
+// Magic link authentication
+const magicAuth = await workos.userManagement.authenticateWithMagicAuth({
+  clientId: process.env.WORKOS_CLIENT_ID!,
+  code: 'magic_link_code_123',
+});
+
+// TOTP authentication
+const totpAuth = await workos.userManagement.authenticateWithTOTP({
+  clientId: process.env.WORKOS_CLIENT_ID!,
+  code: '123456',
+  authenticationChallengeId: 'auth_challenge_123',
+});
+
+// OAuth token exchange
+const oauthAuth = await workos.userManagement.authenticateWithCode({
+  clientId: process.env.WORKOS_CLIENT_ID!,
+  code: 'oauth_code_123',
+});
+```
+
+## Directory sync
+
+Manage directory connections and sync:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+const workos = getWorkOS();
+
+// List directories
+const directories = await workos.directorySync.listDirectories({
+  organizationId: 'org_123',
+});
+
+// Get directory
+const directory = await workos.directorySync.getDirectory('directory_123');
+
+// List directory users
+const directoryUsers = await workos.directorySync.listUsers({
+  directory: 'directory_123',
+  limit: 10,
+});
+
+// List directory groups
+const groups = await workos.directorySync.listGroups({
+  directory: 'directory_123',
+});
+```
+
+## SSO connections
+
+Manage Single Sign-On connections:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+const workos = getWorkOS();
+
+// List SSO connections
+const connections = await workos.sso.listConnections({
+  organizationId: 'org_123',
+});
+
+// Get connection
+const connection = await workos.sso.getConnection('conn_123');
+
+// Delete connection
+await workos.sso.deleteConnection('conn_123');
+```
+
+## Audit logs
+
+Access and export audit logs:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+const workos = getWorkOS();
+
+// Create audit log event
+await workos.auditLogs.createEvent('org_123', {
+  action: 'user.login',
+  actorName: 'user@example.com',
+  actorType: 'user',
+  occurredAt: new Date().toISOString(),
+  targets: [
+    {
+      type: 'user',
+      id: 'user_123',
+    },
+  ],
+});
+
+// Create export of audit logs
+const auditLogExport = await workos.auditLogs.createExport('org_123', {
+  rangeStart: '2024-01-01T00:00:00Z',
+  rangeEnd: '2024-01-31T23:59:59Z',
+  actions: ['user.login', 'user.logout'],
+});
+```
+
+## Webhooks
+
+Verify and handle webhook events:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function POST(req: NextRequest) {
+  const workos = getWorkOS();
+  
+  const body = await req.text();
+  const signature = req.headers.get('workos-signature');
+  const webhookSecret = process.env.WORKOS_WEBHOOK_SECRET!;
+
+  try {
+    // Verify webhook signature
+    const event = workos.webhooks.constructEvent({
+      payload: body,
+      sigHeader: signature!,
+      secret: webhookSecret,
+    });
+
+    // Handle different event types
+    switch (event.event) {
+      case 'user.created':
+        await handleUserCreated(event.data);
+        break;
+      case 'user.updated':
+        await handleUserUpdated(event.data);
+        break;
+      case 'user.deleted':
+        await handleUserDeleted(event.data);
+        break;
+      default:
+        console.log(`Unhandled event type: ${event.event}`);
+    }
+
+    return NextResponse.json({ received: true });
+  } catch (error) {
+    console.error('Webhook verification failed:', error);
+    return NextResponse.json(
+      { error: 'Invalid signature' },
+      { status: 400 }
+    );
+  }
+}
+
+async function handleUserCreated(data: any) {
+  console.log('User created:', data);
+  // Implement your logic
+}
+
+async function handleUserUpdated(data: any) {
+  console.log('User updated:', data);
+  // Implement your logic
+}
+
+async function handleUserDeleted(data: any) {
+  console.log('User deleted:', data);
+  // Implement your logic
+}
+```
+
+## Environment variables
+
+The WorkOS client uses these environment variables:
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `WORKOS_API_KEY` | Yes | - | Your WorkOS API key |
+| `WORKOS_CLIENT_ID` | Yes | - | Your WorkOS client ID |
+| `WORKOS_API_HOSTNAME` | No | `api.workos.com` | WorkOS API hostname |
+| `WORKOS_API_HTTPS` | No | `true` | Use HTTPS for API calls |
+| `WORKOS_API_PORT` | No | - | Custom port for API calls |
+| `WORKOS_WEBHOOK_SECRET` | No | - | Secret for webhook verification |
+
+## Client configuration
+
+The client is configured automatically, but you can customize it:
+
+```ts
+import { WorkOS } from '@workos-inc/node';
+
+// Create a custom client (not recommended unless necessary)
+const customWorkos = new WorkOS(process.env.WORKOS_API_KEY, {
+  apiHostname: 'custom-api.workos.com',
+  https: true,
+  port: 443,
+  appInfo: {
+    name: 'my-app',
+    version: '1.0.0',
+  },
+});
+```
+
+<Warning>
+Using a custom client instead of `getWorkOS()` means you'll need to manage the client instance yourself. The standard `getWorkOS()` function is recommended for most use cases.
+</Warning>
+
+## Complete example: Organization onboarding
+
+Here's a complete example of onboarding a new organization:
+
+```ts
+// app/api/organizations/create/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export async function POST(req: NextRequest) {
+  try {
+    // Verify user is authenticated
+    const { user } = await withAuth({ ensureSignedIn: true });
+    
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { name, domains } = await req.json();
+
+    if (!name || !domains || !Array.isArray(domains)) {
+      return NextResponse.json(
+        { error: 'Name and domains are required' },
+        { status: 400 }
+      );
+    }
+
+    const workos = getWorkOS();
+
+    // Create the organization
+    const organization = await workos.organizations.createOrganization({
+      name,
+      domains,
+    });
+
+    // Add the current user as an admin
+    await workos.userManagement.createOrganizationMembership({
+      organizationId: organization.id,
+      userId: user.id,
+      roleSlug: 'admin',
+    });
+
+    // Create an audit log event
+    await workos.auditLogs.createEvent(organization.id, {
+      action: 'organization.created',
+      actorName: user.email,
+      actorType: 'user',
+      occurredAt: new Date().toISOString(),
+      targets: [
+        {
+          type: 'organization',
+          id: organization.id,
+        },
+      ],
+    });
+
+    return NextResponse.json({
+      success: true,
+      organization,
+    });
+  } catch (error) {
+    console.error('Organization creation failed:', error);
+    return NextResponse.json(
+      { error: 'Failed to create organization' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+## Error handling
+
+Handle WorkOS API errors appropriately:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+try {
+  const workos = getWorkOS();
+  const organization = await workos.organizations.getOrganization('org_123');
+} catch (error) {
+  if (error instanceof Error) {
+    // Check for specific error types
+    if (error.message.includes('not found')) {
+      console.error('Organization not found');
+    } else if (error.message.includes('unauthorized')) {
+      console.error('Invalid API key');
+    } else {
+      console.error('API error:', error.message);
+    }
+  }
+}
+```
+
+## TypeScript support
+
+The WorkOS SDK is fully typed:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+import type { Organization, User, Connection } from '@workos-inc/node';
+
+const workos = getWorkOS();
+
+// Type-safe organization operations
+const organization: Organization = await workos.organizations.getOrganization('org_123');
+
+// Type-safe user operations
+const user: User = await workos.userManagement.getUser('user_123');
+
+// Type-safe SSO operations
+const connection: Connection = await workos.sso.getConnection('conn_123');
+```
+
+## Rate limits
+
+The WorkOS API has rate limits:
+
+- 1,000 requests per minute per API key
+- 429 status code when rate limit exceeded
+- `Retry-After` header indicates when to retry
+
+Implement retry logic:
+
+```ts
+import { getWorkOS } from '@workos-inc/authkit-nextjs';
+
+async function fetchWithRetry<T>(
+  operation: () => Promise<T>,
+  maxRetries = 3
+): Promise<T> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('429')) {
+        // Wait before retrying (exponential backoff)
+        const delay = Math.pow(2, i) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
+// Usage
+const workos = getWorkOS();
+const users = await fetchWithRetry(() => 
+  workos.userManagement.listUsers({ limit: 100 })
+);
+```
+
+## Related resources
+
+- [Custom flows](/advanced/custom-flows) - Implement custom authentication
+- [Composable middleware](/advanced/composable-middleware) - Build custom middleware
+- [WorkOS Node.js SDK](https://github.com/workos/workos-node) - Full SDK documentation
+- [WorkOS API Reference](https://workos.com/docs/reference) - Complete API documentation

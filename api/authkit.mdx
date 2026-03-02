@@ -1,0 +1,202 @@
+---
+title: authkit
+description: Get session data and headers for composable middleware/proxy logic
+---
+
+## Overview
+
+The `authkit` function provides low-level access to authentication session data and headers. It's designed for composable middleware/proxy patterns where you need to combine AuthKit with other middleware logic like rate limiting, custom redirects, or rewrites.
+
+Use this with the `handleAuthkitHeaders` helper to properly merge AuthKit headers into your response.
+
+## Function signature
+
+```typescript
+async function authkit(
+  request: NextRequest,
+  options?: AuthkitOptions
+): Promise<AuthkitResponse>
+```
+
+## Parameters
+
+<ParamField path="request" type="NextRequest" required>
+  The Next.js request object from your middleware/proxy function.
+</ParamField>
+
+<ParamField path="options" type="AuthkitOptions" optional>
+  Configuration options
+  
+  <ParamField path="redirectUri" type="string" optional>
+    Custom redirect URI for OAuth callback. Overrides the environment variable.
+  </ParamField>
+  
+  <ParamField path="debug" type="boolean" default="false">
+    Enable debug logging.
+  </ParamField>
+  
+  <ParamField path="screenHint" type="'sign-up' | 'sign-in'" optional>
+    Screen hint for the authorization URL. Used when generating the `authorizationUrl` in the response.
+  </ParamField>
+  
+  <ParamField path="eagerAuth" type="boolean" default="false">
+    Enable synchronous access token availability on initial page load.
+  </ParamField>
+  
+  <ParamField path="onSessionRefreshSuccess" type="function" optional>
+    Callback invoked when a session is successfully refreshed in the middleware.
+    
+    ```typescript
+    async (data: {
+      accessToken: string;
+      user: User;
+      impersonator?: Impersonator;
+      organizationId?: string;
+    }) => void
+    ```
+  </ParamField>
+  
+  <ParamField path="onSessionRefreshError" type="function" optional>
+    Callback invoked when session refresh fails.
+    
+    ```typescript
+    async (params: {
+      error?: unknown;
+      request: NextRequest;
+    }) => void
+    ```
+  </ParamField>
+</ParamField>
+
+## Return value
+
+<ResponseField name="response" type="AuthkitResponse">
+  <ResponseField name="session" type="UserInfo | NoUserInfo">
+    The authenticated session data, or an object with `user: null` if not authenticated.
+    
+    When authenticated, includes:
+    - `user`: User object with profile information
+    - `accessToken`: JWT access token
+    - `sessionId`: Session identifier
+    - `organizationId`: Organization context (if applicable)
+    - `role`: User role (if applicable)
+    - `roles`: Array of user roles (if applicable)
+    - `permissions`: Array of permissions (if applicable)
+    - `entitlements`: Array of entitlements (if applicable)
+    - `featureFlags`: Array of enabled feature flags (if applicable)
+    - `impersonator`: Impersonator details (if user is being impersonated)
+  </ResponseField>
+  
+  <ResponseField name="headers" type="Headers">
+    Headers to be forwarded to your application. Contains both internal AuthKit headers (for server components) and response headers (for the browser). Use `handleAuthkitHeaders` or `partitionAuthkitHeaders` to properly handle these.
+  </ResponseField>
+  
+  <ResponseField name="authorizationUrl" type="string" optional>
+    The WorkOS authorization URL to redirect unauthenticated users to. Only present when the user is not authenticated.
+  </ResponseField>
+</ResponseField>
+
+## Basic usage
+
+Compose AuthKit with custom middleware logic:
+
+```typescript
+// proxy.ts (Next.js 16+) or middleware.ts (Next.js ≤15)
+import { NextRequest } from 'next/server';
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+
+export default async function proxy(request: NextRequest) {
+  // For Next.js ≤15, use: export default async function middleware(request: NextRequest) {
+  const { session, headers, authorizationUrl } = await authkit(request);
+  const { pathname } = request.nextUrl;
+
+  // Redirect unauthenticated users on protected routes
+  if (pathname.startsWith('/dashboard') && !session.user && authorizationUrl) {
+    return handleAuthkitHeaders(request, headers, {
+      redirect: authorizationUrl,
+    });
+  }
+
+  // Custom redirects
+  if (pathname === '/old-path') {
+    return handleAuthkitHeaders(request, headers, {
+      redirect: '/new-path',
+    });
+  }
+
+  // Continue with merged headers
+  return handleAuthkitHeaders(request, headers);
+}
+
+export const config = { matcher: ['/dashboard/:path*', '/old-path'] };
+```
+
+## Usage with session refresh callbacks
+
+Track session refresh events:
+
+```typescript
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+import { NextRequest } from 'next/server';
+
+export default async function proxy(request: NextRequest) {
+  const { session, headers, authorizationUrl } = await authkit(request, {
+    onSessionRefreshSuccess: async ({ user, organizationId }) => {
+      console.log(`Session refreshed for ${user.email}`);
+      // Log to analytics, update last activity, etc.
+    },
+    onSessionRefreshError: async ({ error, request }) => {
+      console.error('Session refresh failed:', error);
+      // Send to monitoring service
+    },
+  });
+
+  if (!session.user && authorizationUrl) {
+    return handleAuthkitHeaders(request, headers, {
+      redirect: authorizationUrl,
+    });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+```
+
+## Advanced usage with rewrites
+
+For complex scenarios like rewrites, use `partitionAuthkitHeaders`:
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  authkit,
+  partitionAuthkitHeaders,
+  applyResponseHeaders,
+} from '@workos-inc/authkit-nextjs';
+
+export default async function proxy(request: NextRequest) {
+  const { headers } = await authkit(request);
+  const { requestHeaders, responseHeaders } = partitionAuthkitHeaders(
+    request,
+    headers
+  );
+
+  // Create custom response with rewrite
+  const response = NextResponse.rewrite(
+    new URL('/app/dashboard', request.url),
+    { request: { headers: requestHeaders } }
+  );
+
+  // Apply AuthKit response headers
+  applyResponseHeaders(response, responseHeaders);
+
+  return response;
+}
+```
+
+## Important notes
+
+- Always use `handleAuthkitHeaders` or `partitionAuthkitHeaders` when returning a response
+- Never pass `authorizationUrl` directly to a redirect without using `handleAuthkitHeaders`
+- The `authorizationUrl` is a trusted value safe for redirects
+- For custom redirects, always validate user-controlled input before passing to `redirect` option
+- Session refresh callbacks are useful for logging but should not throw errors

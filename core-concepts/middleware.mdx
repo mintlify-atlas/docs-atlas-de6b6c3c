@@ -1,0 +1,703 @@
+---
+title: 'Middleware'
+description: 'Learn how AuthKit middleware protects routes, updates sessions, and handles authentication state in Next.js applications'
+keywords: ['middleware', 'authentication', 'authorization', 'route protection', 'next.js']
+---
+
+The AuthKit middleware is a Next.js Edge Middleware that intercepts requests to manage sessions, protect routes, and ensure users are authenticated. It runs before your page code executes.
+
+## What middleware does
+
+The middleware performs several critical functions:
+
+<CardGroup cols={2}>
+  <Card title="Session validation" icon="check-circle">
+    Verifies access tokens and refreshes them when expired
+  </Card>
+  <Card title="Route protection" icon="shield">
+    Redirects unauthenticated users to AuthKit sign-in
+  </Card>
+  <Card title="State injection" icon="arrow-down">
+    Makes session data available to server components via headers
+  </Card>
+  <Card title="Cache control" icon="clock">
+    Prevents caching of authenticated responses
+  </Card>
+</CardGroup>
+
+## Basic setup
+
+Create a middleware file at the root of your Next.js app:
+
+```typescript middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+// Specify which routes middleware should run on
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
+};
+```
+
+<Info>
+The matcher ensures middleware runs on all routes except static assets, images, and Next.js internals.
+</Info>
+
+## Configuration options
+
+Configure middleware behavior by passing options:
+
+```typescript middleware.ts
+export default authkitMiddleware({
+  debug: true,
+  redirectUri: 'http://localhost:3000/api/auth/callback',
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/pricing', '/about'],
+  },
+  signUpPaths: ['/signup', '/register'],
+  eagerAuth: true,
+});
+```
+
+### Available options
+
+<AccordionGroup>
+  <Accordion title="debug">
+    **Type:** `boolean` 
+    **Default:** `false`
+    
+    Enables detailed logging of middleware operations:
+    - Session refresh attempts
+    - Authentication state changes
+    - Redirect decisions
+    
+    ```typescript
+    export default authkitMiddleware({ debug: true });
+    ```
+    
+    Useful for troubleshooting authentication issues in development.
+  </Accordion>
+  
+  <Accordion title="redirectUri">
+    **Type:** `string` 
+    **Default:** `WORKOS_REDIRECT_URI` from environment
+    
+    Override the callback URL used for OAuth redirects:
+    
+    ```typescript
+    export default authkitMiddleware({
+      redirectUri: 'https://app.example.com/api/auth/callback',
+    });
+    ```
+    
+    This is stored in a header and used by `getAuthorizationUrl()`.
+  </Accordion>
+  
+  <Accordion title="middlewareAuth">
+    **Type:** `object` 
+    **Default:** `{ enabled: false, unauthenticatedPaths: [] }`
+    
+    Enable automatic route protection:
+    
+    ```typescript
+    export default authkitMiddleware({
+      middlewareAuth: {
+        enabled: true,
+        unauthenticatedPaths: ['/pricing', '/about', '/blog/*'],
+      },
+    });
+    ```
+    
+    When enabled:
+    - All routes require authentication by default
+    - Routes in `unauthenticatedPaths` are accessible to everyone
+    - Unauthenticated users are redirected to AuthKit
+    
+    Supports glob patterns:
+    - `/blog/*` - All blog posts
+    - `/docs/**` - All docs pages including nested
+    - `/api/:id` - Dynamic segments
+  </Accordion>
+  
+  <Accordion title="signUpPaths">
+    **Type:** `string[]` 
+    **Default:** `[]`
+    
+    Specify which routes should show the sign-up screen instead of sign-in:
+    
+    ```typescript
+    export default authkitMiddleware({
+      signUpPaths: ['/signup', '/register', '/get-started'],
+    });
+    ```
+    
+    When users are redirected from these paths, AuthKit will show the sign-up screen by default.
+  </Accordion>
+  
+  <Accordion title="eagerAuth">
+    **Type:** `boolean` 
+    **Default:** `false`
+    
+    Enable client-side access to authentication tokens:
+    
+    ```typescript
+    export default authkitMiddleware({
+      eagerAuth: true,
+    });
+    ```
+    
+    When enabled:
+    - Access token is copied to a separate cookie
+    - Client components can read authentication state
+    - Only applies to initial page loads, not API requests
+    - Cookie expires after 30 seconds for security
+    
+    Use with `useAccessToken()` and `useTokenClaims()` hooks.
+  </Accordion>
+</AccordionGroup>
+
+## How middleware works
+
+Let's trace what happens when a request hits your application.
+
+### Request flow
+
+<Steps>
+  <Step title="Middleware intercepts request">
+    Next.js Edge Middleware runs before your page or API route
+  </Step>
+  <Step title="Session retrieval">
+    Middleware reads and decrypts the session cookie
+  </Step>
+  <Step title="Token validation">
+    Access token is verified against WorkOS JWKS
+  </Step>
+  <Step title="Refresh if needed">
+    If token is expired, middleware refreshes it automatically
+  </Step>
+  <Step title="Authorization check">
+    If route protection is enabled, checks if user is authenticated
+  </Step>
+  <Step title="Header injection">
+    Session data is injected into request headers for server components
+  </Step>
+  <Step title="Response handling">
+    Either continues to your page or redirects to AuthKit
+  </Step>
+</Steps>
+
+### Session update process
+
+Here's the core session update logic from `session.ts:174-259`:
+
+```typescript
+async function updateSession(
+  request: NextRequest,
+  options: AuthkitOptions = {},
+): Promise<AuthkitResponse> {
+  // Get session from cookie
+  const session = await getSessionFromCookie(request);
+  
+  // Create fresh headers
+  const newRequestHeaders = new Headers();
+  newRequestHeaders.set('x-workos-middleware', 'true');
+  newRequestHeaders.set('x-url', request.url);
+  
+  // No session - user is signed out
+  if (!session) {
+    return {
+      session: { user: null },
+      headers: newRequestHeaders,
+      authorizationUrl: await getAuthorizationUrl({
+        returnPathname: getReturnPathname(request.url),
+      }),
+    };
+  }
+  
+  // Verify access token
+  const hasValidSession = await verifyAccessToken(session.accessToken);
+  
+  // Token is valid - continue with current session
+  if (hasValidSession) {
+    newRequestHeaders.set('x-workos-session', encryptedSession);
+    
+    return {
+      session: userInfoFromToken,
+      headers: newRequestHeaders,
+    };
+  }
+  
+  // Token expired - refresh it
+  try {
+    const { accessToken, refreshToken, user, impersonator } =
+      await workos.userManagement.authenticateWithRefreshToken({
+        clientId: WORKOS_CLIENT_ID,
+        refreshToken: session.refreshToken,
+      });
+    
+    // Update cookie with new tokens
+    const encryptedSession = await encryptSession({
+      accessToken,
+      refreshToken,
+      user,
+      impersonator,
+    });
+    
+    newRequestHeaders.append(
+      'Set-Cookie',
+      `${cookieName}=${encryptedSession}; ${getCookieOptions()}`
+    );
+    
+    return {
+      session: userInfoFromNewToken,
+      headers: newRequestHeaders,
+    };
+  } catch (e) {
+    // Refresh failed - clear session
+    newRequestHeaders.append(
+      'Set-Cookie',
+      `${cookieName}=; Expires=${new Date(0).toUTCString()}`
+    );
+    
+    return {
+      session: { user: null },
+      headers: newRequestHeaders,
+      authorizationUrl: await getAuthorizationUrl(),
+    };
+  }
+}
+```
+
+### Header injection
+
+Middleware communicates with your application through special headers:
+
+| Header | Purpose |
+|--------|----------|
+| `x-workos-middleware` | Indicates middleware is running |
+| `x-workos-session` | Encrypted session for `withAuth()` |
+| `x-url` | Current request URL |
+| `x-redirect-uri` | Configured redirect URI |
+| `x-sign-up-paths` | Paths that show sign-up screen |
+
+These headers are:
+- Set by middleware
+- Forwarded to your pages/routes
+- Never sent to the browser
+- Used by `withAuth()` to access session data
+
+Implementation from `middleware-helpers.ts:54-87`:
+
+```typescript
+export function partitionAuthkitHeaders(
+  request: NextRequest,
+  authkitHeaders: Headers
+): AuthkitHeadersResult {
+  const requestHeaders = new Headers(request.headers);
+
+  // Strip any client-injected authkit headers
+  for (const name of requestHeaders.keys()) {
+    if (isAuthkitRequestHeader(name)) {
+      requestHeaders.delete(name);
+    }
+  }
+  
+  // Apply trusted headers from middleware
+  for (const headerName of AUTHKIT_REQUEST_HEADERS) {
+    const value = authkitHeaders.get(headerName);
+    if (value != null) {
+      requestHeaders.set(headerName, value);
+    }
+  }
+  
+  // Build response headers (cookies, cache-control, etc.)
+  const responseHeaders = new Headers();
+  for (const [name, value] of authkitHeaders) {
+    const lower = name.toLowerCase();
+    if (!isAuthkitRequestHeader(lower) && 
+        ALLOWED_RESPONSE_HEADERS.includes(lower)) {
+      responseHeaders.set(name, value);
+    }
+  }
+  
+  return { requestHeaders, responseHeaders };
+}
+```
+
+## Route protection
+
+There are two approaches to protecting routes: middleware auth and manual checks.
+
+### Middleware auth (recommended)
+
+Enable automatic protection for all routes:
+
+```typescript middleware.ts
+export default authkitMiddleware({
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: [
+      '/',           // Homepage
+      '/pricing',    // Marketing pages
+      '/about',
+      '/blog/*',     // All blog posts
+      '/api/webhooks', // Public API endpoints
+    ],
+  },
+});
+```
+
+<Info>
+The callback route is automatically added to `unauthenticatedPaths` to prevent redirect loops.
+</Info>
+
+With middleware auth enabled:
+- Unauthenticated users are redirected to AuthKit
+- Authenticated users can access all routes not in the allowlist
+- No need to check authentication in each page
+
+### Path matching
+
+Path patterns support glob syntax using `path-to-regexp`:
+
+```typescript
+unauthenticatedPaths: [
+  '/about',           // Exact match
+  '/blog/*',          // One segment: /blog/post-1
+  '/docs/**',         // Any depth: /docs/a/b/c
+  '/api/:id',         // Dynamic segment
+  '/api/:id/edit',    // Dynamic with suffix
+]
+```
+
+Implementation from `session.ts:423-438`:
+
+```typescript
+function getMiddlewareAuthPathRegex(pathGlob: string) {
+  try {
+    const url = new URL(pathGlob, 'https://example.com');
+    const path = `${url.pathname}${url.hash || ''}`;
+
+    const tokens = parse(path);
+    const regex = tokensToRegexp(tokens).source;
+
+    return new RegExp(regex);
+  } catch (err) {
+    throw new Error(
+      `Error parsing routes for middleware auth: ${err.message}`
+    );
+  }
+}
+```
+
+### Manual protection
+
+For fine-grained control, check authentication in your page:
+
+```typescript app/dashboard/page.tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+import { redirect } from 'next/navigation';
+
+export default async function DashboardPage() {
+  const { user } = await withAuth();
+  
+  if (!user) {
+    redirect('/login');
+  }
+  
+  return <Dashboard user={user} />;
+}
+```
+
+Or redirect automatically:
+
+```typescript
+const { user, permissions } = await withAuth({ ensureSignedIn: true });
+
+// User is guaranteed to be authenticated here
+if (!permissions.includes('admin')) {
+  return <Forbidden />;
+}
+```
+
+## Cache control
+
+Middleware automatically prevents caching of authenticated responses to avoid leaking user data.
+
+### Cache headers
+
+For authenticated requests, middleware sets from `session.ts:43-76`:
+
+```typescript
+function applyCacheSecurityHeaders(
+  headers: Headers,
+  request: NextRequest,
+  sessionData?: Session,
+): void {
+  // Only apply for authenticated requests
+  if (!sessionData?.accessToken && 
+      !request.cookies.has(cookieName) && 
+      !request.headers.has('authorization')) {
+    return;
+  }
+  
+  // Vary by Cookie and Authorization
+  const varyValues = new Set<string>(['cookie']);
+  if (request.headers.has('authorization')) {
+    varyValues.add('authorization');
+  }
+  headers.set('Vary', Array.from(varyValues).join(', '));
+  
+  // Prevent caching
+  headers.set('Cache-Control', 'no-store, must-revalidate');
+  headers.set('Pragma', 'no-cache');
+}
+```
+
+This ensures:
+- CDNs don't cache authenticated pages
+- Browser doesn't serve stale authentication state
+- Different users don't see each other's content
+
+<Warning>
+Public (unauthenticated) pages are not affected and can still be cached normally.
+</Warning>
+
+## Eager authentication
+
+By default, authentication state is only available server-side. Enable eager auth to access it client-side:
+
+```typescript middleware.ts
+export default authkitMiddleware({
+  eagerAuth: true,
+});
+```
+
+### How eager auth works
+
+When enabled and the request is for an initial page load (not RSC/prefetch):
+
+1. Middleware copies the access token to a separate cookie
+2. Cookie is readable by JavaScript (not HttpOnly)
+3. Cookie expires after 30 seconds
+4. Client components can use `useAccessToken()` hook
+
+From `session.ts:236-243`:
+
+```typescript
+// Set JWT cookie if eagerAuth is enabled
+// Only set on document requests (initial page loads)
+if (options.eagerAuth && isInitialDocumentRequest(request)) {
+  const existingJwtCookie = request.cookies.get(jwtCookieName);
+  // Only set if cookie doesn't exist or has different value
+  if (!existingJwtCookie || existingJwtCookie.value !== session.accessToken) {
+    newRequestHeaders.append('Set-Cookie', getJwtCookie(session.accessToken));
+  }
+}
+```
+
+### Initial document detection
+
+Middleware only sets the JWT cookie for initial page loads to avoid unnecessary cookie operations:
+
+```typescript
+function isInitialDocumentRequest(request: NextRequest): boolean {
+  const accept = request.headers.get('accept') || '';
+  const isDocumentRequest = accept.includes('text/html');
+  const isRSCRequest = request.headers.has('RSC');
+  const isPrefetch = request.headers.get('Purpose') === 'prefetch';
+
+  return isDocumentRequest && !isRSCRequest && !isPrefetch;
+}
+```
+
+### Using eager auth
+
+In your client components:
+
+```typescript 'use client'
+import { useAccessToken, useTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export function UserProfile() {
+  const { accessToken } = useAccessToken();
+  const { user, permissions } = useTokenClaims();
+  
+  if (!accessToken) {
+    return <div>Loading...</div>;
+  }
+  
+  return (
+    <div>
+      <p>Email: {user.email}</p>
+      <p>Permissions: {permissions.join(', ')}</p>
+    </div>
+  );
+}
+```
+
+<Warning>
+The JWT cookie is not refreshed automatically. For long-running client components, the token may expire. Always handle the case where `accessToken` is null.
+</Warning>
+
+## Error handling
+
+Middleware handles several error scenarios:
+
+### Configuration errors
+
+```typescript
+if (!WORKOS_COOKIE_PASSWORD || WORKOS_COOKIE_PASSWORD.length < 32) {
+  throw new Error(
+    'You must provide a valid cookie password that is at least 32 characters.'
+  );
+}
+
+if (!redirectUri && !WORKOS_REDIRECT_URI) {
+  throw new Error(
+    'You must provide a redirect URI in the middleware or environment.'
+  );
+}
+```
+
+### Refresh errors
+
+When token refresh fails:
+1. Session cookie is deleted
+2. Error hook is called (if configured)
+3. User is redirected to sign in (if route protection enabled)
+
+```typescript middleware.ts
+export default authkitMiddleware({
+  onSessionRefreshError: ({ error, request }) => {
+    console.error('Session refresh failed:', error);
+    // Send to monitoring service
+  },
+});
+```
+
+### withAuth errors
+
+If you call `withAuth()` on a route without middleware:
+
+```typescript
+const headersList = await headers();
+const hasMiddleware = Boolean(headersList.get('x-workos-middleware'));
+
+if (!hasMiddleware) {
+  const url = headersList.get('x-url');
+  throw new Error(
+    `You are calling 'withAuth' on ${url} that isn't covered by middleware. ` +
+    `Update your middleware config in 'middleware.ts'.`
+  );
+}
+```
+
+## Matcher configuration
+
+The matcher determines which routes run middleware. Common patterns:
+
+### Protect all routes except static files
+
+```typescript
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
+};
+```
+
+### Protect specific sections
+
+```typescript
+export const config = {
+  matcher: [
+    '/dashboard/:path*',
+    '/admin/:path*',
+    '/api/:path*',
+  ],
+};
+```
+
+### Exclude API routes
+
+```typescript
+export const config = {
+  matcher: [
+    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+  ],
+};
+```
+
+<Info>
+Matchers use Next.js path matching syntax, not the same glob syntax as `unauthenticatedPaths`.
+</Info>
+
+## Performance considerations
+
+### Edge runtime
+
+Middleware runs on the Edge Runtime, which means:
+- Low latency (runs close to users)
+- Limited to Edge-compatible APIs
+- Cannot use Node.js-specific libraries
+
+### Session validation cost
+
+On each request:
+- Session is decrypted (fast)
+- Access token is verified via JWKS (cached)
+- If expired, refresh token exchange (one API call)
+
+This adds minimal latency (typically less than 50ms).
+
+### Caching JWKS
+
+JWKS keys are fetched from WorkOS and cached:
+
+```typescript
+const JWKS = lazy(() => 
+  createRemoteJWKSet(
+    new URL(workos.userManagement.getJwksUrl(clientId))
+  )
+);
+```
+
+Keys are cached until they rotate, reducing network requests.
+
+## Debugging
+
+Enable debug logging to troubleshoot issues:
+
+```typescript middleware.ts
+export default authkitMiddleware({
+  debug: true,
+});
+```
+
+Logs include:
+
+```bash
+No session found from cookie
+Session invalid. Refreshing access token that ends in ...abc123
+Session successfully refreshed
+Unauthenticated user on protected route /dashboard, redirecting to AuthKit
+```
+
+<Tip>
+Always enable debug mode when troubleshooting authentication issues. Disable it in production to avoid log noise.
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication flow" icon="arrow-right-arrow-left" href="/core-concepts/authentication-flow">
+    Understand how users authenticate with AuthKit
+  </Card>
+  <Card title="Session management" icon="clock" href="/core-concepts/session-management">
+    Deep dive into session lifecycle and token refresh
+  </Card>
+</CardGroup>

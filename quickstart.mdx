@@ -1,80 +1,388 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Add authentication to your Next.js app in under 5 minutes
 ---
 
-## Get started in three steps
+This guide will walk you through setting up a complete authentication flow in your Next.js application using AuthKit.
 
-Get your documentation site running locally and make your first customization.
+<Note>
+Make sure you've completed the [installation](/installation) steps before starting this quickstart.
+</Note>
 
-### Step 1: Set up your local environment
+## Step 1: Create the callback route
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+AuthKit redirects users back to your app after authentication. Create a route handler to process this callback.
+
+Create a file at `app/callback/route.ts`:
+
+```ts app/callback/route.ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth();
+```
+
+<Tip>
+Make sure this route matches your `NEXT_PUBLIC_WORKOS_REDIRECT_URI` environment variable. If your redirect URI is `http://localhost:3000/auth/callback`, create the file at `app/auth/callback/route.ts` instead.
+</Tip>
+
+### Customize the redirect path
+
+By default, users are redirected to `/` after signing in. Customize this with the `returnPathname` option:
+
+```ts app/callback/route.ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({ 
+  returnPathname: '/dashboard' 
+});
+```
+
+### Handle successful authentication
+
+Use the `onSuccess` callback to save OAuth tokens or perform other actions:
+
+```ts app/callback/route.ts
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  onSuccess: async ({ user, oauthTokens, authenticationMethod }) => {
+    // Save OAuth tokens from upstream providers
+    if (oauthTokens) {
+      await saveTokens(user.id, oauthTokens);
+    }
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    // Track how the user authenticated
+    if (authenticationMethod) {
+      await analytics.track('user_signed_in', {
+        userId: user.id,
+        method: authenticationMethod, // e.g., 'google-oauth', 'password'
+      });
+    }
+  },
+});
+```
+
+## Step 2: Set up middleware
+
+Middleware manages sessions and handles authentication for protected routes.
+
+<Tabs>
+  <Tab title="Next.js 16+">
+    Create a `proxy.ts` file in your project root:
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    ```ts proxy.ts
+    import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    export default authkitMiddleware();
+    
+    // Protect specific routes
+    export const config = { 
+      matcher: ['/dashboard/:path*', '/account'] 
+    };
+    ```
+  </Tab>
+  
+  <Tab title="Next.js 15 and earlier">
+    Create a `middleware.ts` file in your project root:
+    
+    ```ts middleware.ts
+    import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+    
+    export default authkitMiddleware();
+    
+    // Protect specific routes
+    export const config = { 
+      matcher: ['/dashboard/:path*', '/account'] 
+    };
+    ```
+  </Tab>
+</Tabs>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Warning>
+Avoid using catch-all matcher patterns like `['/(.*)', '/:path*']` as they can intercept static assets (CSS, images, fonts) and break styling. If you need broad coverage, exclude Next.js internal paths:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+```ts
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+};
+```
+</Warning>
 
-### Step 3: Go live
+## Step 3: Wrap your app with AuthKitProvider
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+The `AuthKitProvider` enables client-side authentication hooks and handles auth edge cases.
+
+Update your root layout:
+
+```tsx app/layout.tsx
+import { AuthKitProvider } from '@workos-inc/authkit-nextjs/components';
+
+export default function RootLayout({ 
+  children 
+}: { 
+  children: React.ReactNode 
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <AuthKitProvider>
+          {children}
+        </AuthKitProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+### Optimize with server-side data
+
+Avoid an extra server action call by passing initial auth data:
+
+```tsx app/layout.tsx
+import { AuthKitProvider } from '@workos-inc/authkit-nextjs/components';
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function RootLayout({ 
+  children 
+}: { 
+  children: React.ReactNode 
+}) {
+  // Fetch auth data on the server
+  const auth = await withAuth();
+  
+  // Remove accessToken (not needed on client)
+  const { accessToken, ...initialAuth } = auth;
+  
+  return (
+    <html lang="en">
+      <body>
+        <AuthKitProvider initialAuth={initialAuth}>
+          {children}
+        </AuthKitProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+## Step 4: Add authentication to your pages
+
+Now you can access user data in both server and client components.
+
+### Server component example
+
+Create a homepage with sign-in/sign-out functionality:
+
+```tsx app/page.tsx
+import Link from 'next/link';
+import { 
+  withAuth, 
+  getSignInUrl, 
+  getSignUpUrl,
+  signOut 
+} from '@workos-inc/authkit-nextjs';
+
+export default async function HomePage() {
+  const { user } = await withAuth();
+  
+  if (!user) {
+    const signInUrl = await getSignInUrl();
+    const signUpUrl = await getSignUpUrl();
+    
+    return (
+      <div>
+        <h1>Welcome to our app</h1>
+        <Link href={signInUrl}>Sign in</Link>
+        <Link href={signUpUrl}>Sign up</Link>
+      </div>
+    );
+  }
+  
+  return (
+    <div>
+      <h1>Welcome back, {user.firstName}!</h1>
+      <p>Email: {user.email}</p>
+      
+      <form action={async () => {
+        'use server';
+        await signOut();
+      }}>
+        <button type="submit">Sign out</button>
+      </form>
+    </div>
+  );
+}
+```
+
+### Client component example
+
+For client components, use the `useAuth` hook:
+
+```tsx app/components/user-menu.tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export function UserMenu() {
+  const { user, loading } = useAuth();
+  
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+  
+  if (!user) {
+    return <div>Not signed in</div>;
+  }
+  
+  return (
+    <div>
+      <img src={user.profilePictureUrl} alt={user.firstName} />
+      <span>{user.firstName} {user.lastName}</span>
+      <span>{user.email}</span>
+    </div>
+  );
+}
+```
+
+### Require authentication
+
+Force users to sign in before accessing a page:
+
+<CodeGroup>
+```tsx Server component
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function DashboardPage() {
+  // Redirects to AuthKit if not signed in
+  const { user } = await withAuth({ ensureSignedIn: true });
+  
+  return <div>Welcome to your dashboard, {user.firstName}!</div>;
+}
+```
+
+```tsx Client component
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function DashboardPage() {
+  // Redirects to AuthKit if not signed in
+  const { user, loading } = useAuth({ ensureSignedIn: true });
+  
+  if (loading) return <div>Loading...</div>;
+  
+  return <div>Welcome to your dashboard, {user.firstName}!</div>;
+}
+```
+</CodeGroup>
+
+## Step 5: Test authentication
+
+Start your development server and test the authentication flow:
+
+<Steps>
+  <Step title="Start your app">
+    ```bash
+    npm run dev
+    ```
+  </Step>
+  
+  <Step title="Navigate to your app">
+    Open [http://localhost:3000](http://localhost:3000) in your browser
+  </Step>
+  
+  <Step title="Click sign in">
+    You'll be redirected to the WorkOS AuthKit hosted authentication page
+  </Step>
+  
+  <Step title="Authenticate">
+    Sign in with your configured authentication method (email, Google, GitHub, etc.)
+  </Step>
+  
+  <Step title="Return to your app">
+    After successful authentication, you'll be redirected back to your app with an active session
+  </Step>
+</Steps>
+
+## Optional: Add user impersonation UI
+
+Display a banner when impersonating users for customer support:
+
+```tsx app/layout.tsx
+import { 
+  AuthKitProvider, 
+  Impersonation 
+} from '@workos-inc/authkit-nextjs/components';
+
+export default function RootLayout({ 
+  children 
+}: { 
+  children: React.ReactNode 
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <AuthKitProvider>
+          <Impersonation />
+          {children}
+        </AuthKitProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+The `Impersonation` component automatically shows a banner with user details and a "Stop impersonating" button when an admin is impersonating a user.
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Access tokens" icon="key">
+    Learn how to get access tokens for API calls to external services
+  </Card>
+  
+  <Card title="Organization switching" icon="building">
+    Enable users to switch between different organizations
+  </Card>
+  
+  <Card title="Feature flags" icon="flag">
+    Use feature flags to control access to features for specific users
+  </Card>
+  
+  <Card title="API key validation" icon="shield-check">
+    Secure your API endpoints with WorkOS API keys
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Common issues
+
+<AccordionGroup>
+  <Accordion title="NEXT_REDIRECT error in try/catch blocks">
+    Don't wrap `withAuth({ ensureSignedIn: true })` in try/catch. Next.js redirects must be called outside try/catch blocks. Use the return value to check for authentication instead:
+    
+    ```tsx
+    const { user } = await withAuth();
+    if (!user) {
+      // Handle unauthenticated state
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="UnhandledSchemeError with node:crypto">
+    This error occurs when importing server-side code in client components. Make sure you're using `useAuth()` in client components and `withAuth()` in server components. Check that all files using `withAuth()` are server components (no `'use client'` directive).
+  </Accordion>
+  
+  <Accordion title="Styles breaking with catch-all matcher">
+    Catch-all middleware matchers can intercept CSS and image requests. Use a more specific matcher or exclude Next.js internal paths:
+    
+    ```ts
+    export const config = {
+      matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+    };
+    ```
+  </Accordion>
+  
+  <Accordion title="Redirect URI mismatch">
+    Ensure your `NEXT_PUBLIC_WORKOS_REDIRECT_URI` exactly matches the callback route path and the redirect URI configured in your WorkOS dashboard. The URI must include the protocol (http:// or https://) and port number for local development.
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,237 @@
+---
+title: refreshSession
+description: Refresh the user session and optionally switch organizations
+---
+
+`refreshSession` fetches the latest session details from WorkOS, including any changes to roles, permissions, or organization context. It can also be used to switch the session to a different organization.
+
+## Usage
+
+```typescript
+import { refreshSession } from '@workos-inc/authkit-nextjs';
+
+const session = await refreshSession();
+```
+
+## Signature
+
+```typescript
+async function refreshSession(options?: {
+  organizationId?: string;
+  ensureSignedIn?: boolean;
+}): Promise<UserInfo | NoUserInfo>
+
+async function refreshSession(options: {
+  organizationId?: string;
+  ensureSignedIn: true;
+}): Promise<UserInfo>
+```
+
+## Parameters
+
+<ParamField path="options" type="object" optional>
+  Configuration options for refreshing the session.
+  
+  <Expandable title="properties">
+    <ParamField path="organizationId" type="string" optional>
+      The ID of the organization to switch to. If provided, the session will be updated to this organization's context. If the user is not authorized for this organization, an authentication error will be thrown.
+    </ParamField>
+    
+    <ParamField path="ensureSignedIn" type="boolean" default="false">
+      When `true`, redirects unauthenticated users to AuthKit. When `false`, returns `{ user: null }` for unauthenticated users.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Returns
+
+<ResponseField name="user" type="User | null">
+  The authenticated user object with updated information, or `null` if not authenticated.
+</ResponseField>
+
+<ResponseField name="sessionId" type="string | undefined">
+  The unique session identifier.
+</ResponseField>
+
+<ResponseField name="organizationId" type="string | undefined">
+  The ID of the user's current organization context.
+</ResponseField>
+
+<ResponseField name="role" type="string | undefined">
+  The user's updated role in the current organization.
+</ResponseField>
+
+<ResponseField name="roles" type="string[] | undefined">
+  Array of all roles assigned to the user.
+</ResponseField>
+
+<ResponseField name="permissions" type="string[] | undefined">
+  Array of updated permissions granted to the user.
+</ResponseField>
+
+<ResponseField name="entitlements" type="string[] | undefined">
+  Array of updated entitlements available to the user.
+</ResponseField>
+
+<ResponseField name="featureFlags" type="string[] | undefined">
+  Array of updated feature flags for the user.
+</ResponseField>
+
+<ResponseField name="impersonator" type="Impersonator | undefined">
+  Information about the impersonator, if the user is being impersonated.
+</ResponseField>
+
+<ResponseField name="accessToken" type="string | undefined">
+  New JWT access token for the refreshed session.
+</ResponseField>
+
+## Examples
+
+### Basic session refresh
+
+```typescript
+'use server';
+
+import { refreshSession } from '@workos-inc/authkit-nextjs';
+
+export async function refreshUserData() {
+  const session = await refreshSession();
+  
+  if (!session.user) {
+    return { error: 'Not authenticated' };
+  }
+  
+  return { permissions: session.permissions };
+}
+```
+
+### Switching organizations
+
+```typescript
+'use server';
+
+import { refreshSession } from '@workos-inc/authkit-nextjs';
+import { revalidatePath } from 'next/cache';
+
+export async function switchOrganization(organizationId: string) {
+  try {
+    const session = await refreshSession({
+      organizationId,
+      ensureSignedIn: true,
+    });
+    
+    // Revalidate the current page to reflect new org context
+    revalidatePath('/');
+    
+    return { success: true, organizationId: session.organizationId };
+  } catch (error) {
+    return { error: 'Failed to switch organization' };
+  }
+}
+```
+
+### Checking for permission updates
+
+```typescript
+'use server';
+
+import { refreshSession, withAuth } from '@workos-inc/authkit-nextjs';
+
+export async function checkPermissionUpdates() {
+  const currentSession = await withAuth();
+  const refreshedSession = await refreshSession({ ensureSignedIn: true });
+  
+  const newPermissions = refreshedSession.permissions?.filter(
+    (p) => !currentSession.permissions?.includes(p)
+  );
+  
+  return {
+    hasNewPermissions: (newPermissions?.length ?? 0) > 0,
+    newPermissions,
+  };
+}
+```
+
+### Organization switcher component
+
+```typescript
+'use server';
+
+import { refreshSession } from '@workos-inc/authkit-nextjs';
+import { redirect } from 'next/navigation';
+
+export async function handleOrgSwitch(formData: FormData) {
+  const organizationId = formData.get('organizationId') as string;
+  
+  try {
+    await refreshSession({
+      organizationId,
+      ensureSignedIn: true,
+    });
+  } catch (error) {
+    // Handle SSO or MFA requirements
+    if (error instanceof Error && error.message.includes('sso_required')) {
+      redirect('/auth/sso-required');
+    }
+    throw error;
+  }
+  
+  redirect('/dashboard');
+}
+```
+
+### Refreshing after role change
+
+```typescript
+'use server';
+
+import { refreshSession } from '@workos-inc/authkit-nextjs';
+
+export async function updateUserRoleAndRefresh(userId: string, newRole: string) {
+  // Update role in your system
+  await database.updateUserRole(userId, newRole);
+  
+  // Update role in WorkOS
+  await workos.userManagement.updateOrganizationMembership({
+    organizationMembershipId: 'om_123',
+    roleSlug: newRole,
+  });
+  
+  // Refresh the session to get updated role information
+  const session = await refreshSession({ ensureSignedIn: true });
+  
+  return {
+    success: true,
+    newRole: session.role,
+  };
+}
+```
+
+## Error Handling
+
+`refreshSession` may throw a `TokenRefreshError` if the refresh fails:
+
+```typescript
+import { refreshSession } from '@workos-inc/authkit-nextjs';
+
+try {
+  await refreshSession({ organizationId: 'org_123' });
+} catch (error) {
+  if (error instanceof Error) {
+    // Handle specific auth errors
+    if (error.message.includes('sso_required')) {
+      // Redirect to SSO flow
+    } else if (error.message.includes('mfa_enrollment')) {
+      // Redirect to MFA setup
+    }
+  }
+}
+```
+
+## Notes
+
+- Refreshing a session updates the session cookie with new access and refresh tokens
+- When switching organizations, the user must be authorized for that organization
+- The function will throw an error if the session cannot be refreshed
+- Use `ensureSignedIn: true` to guarantee authentication and avoid null checks
+- This is useful after making changes to user roles or permissions in WorkOS

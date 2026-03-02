@@ -1,0 +1,203 @@
+---
+title: partitionAuthkitHeaders
+description: Split AuthKit headers into request headers and response headers for advanced middleware patterns
+---
+
+## Overview
+
+The `partitionAuthkitHeaders` function separates AuthKit headers into two groups:
+
+1. **Request headers**: Internal AuthKit headers to be forwarded to your pages (for `withAuth()` to work)
+2. **Response headers**: Safe headers to be sent to the browser (cookies, cache control, etc.)
+
+This is a lower-level utility for advanced middleware patterns like rewrites. For most use cases, use `handleAuthkitHeaders` instead.
+
+## Function signature
+
+```typescript
+function partitionAuthkitHeaders(
+  request: NextRequest,
+  authkitHeaders: Headers
+): AuthkitHeadersResult
+```
+
+## Parameters
+
+<ParamField path="request" type="NextRequest" required>
+  The Next.js request object from your middleware/proxy function.
+</ParamField>
+
+<ParamField path="authkitHeaders" type="Headers" required>
+  The headers object returned from the `authkit()` function.
+</ParamField>
+
+## Return value
+
+<ResponseField name="result" type="AuthkitHeadersResult">
+  <ResponseField name="requestHeaders" type="Headers">
+    Headers to be forwarded to downstream handlers and pages. Includes:
+    - All original request headers
+    - Internal AuthKit headers (`x-workos-middleware`, `x-workos-session`, `x-url`, etc.)
+    - Client-injected AuthKit headers are stripped and replaced with trusted values
+  </ResponseField>
+  
+  <ResponseField name="responseHeaders" type="Headers">
+    Headers safe to send to the browser. Includes:
+    - `set-cookie`: Session cookies
+    - `cache-control`: Set to `no-store` when cookies are present
+    - `vary`: Cache variation keys
+    - `www-authenticate`: Authentication challenges
+    - `proxy-authenticate`: Proxy authentication
+    - `link`: Pagination, preload hints, etc.
+    - `x-middleware-cache`: Set to `no-cache`
+  </ResponseField>
+</ResponseField>
+
+## Basic usage with rewrites
+
+Use with `applyResponseHeaders` for custom response creation:
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  authkit,
+  partitionAuthkitHeaders,
+  applyResponseHeaders,
+} from '@workos-inc/authkit-nextjs';
+
+export default async function proxy(request: NextRequest) {
+  const { headers } = await authkit(request);
+  const { requestHeaders, responseHeaders } = partitionAuthkitHeaders(
+    request,
+    headers
+  );
+
+  // Create a rewrite with request headers
+  const response = NextResponse.rewrite(
+    new URL('/app/dashboard', request.url),
+    { request: { headers: requestHeaders } }
+  );
+
+  // Apply response headers (cookies, cache-control, etc.)
+  applyResponseHeaders(response, responseHeaders);
+
+  return response;
+}
+```
+
+## Usage with custom response logic
+
+Manually construct responses for complex scenarios:
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  authkit,
+  partitionAuthkitHeaders,
+  applyResponseHeaders,
+} from '@workos-inc/authkit-nextjs';
+
+export default async function proxy(request: NextRequest) {
+  const { session, headers } = await authkit(request);
+  const { requestHeaders, responseHeaders } = partitionAuthkitHeaders(
+    request,
+    headers
+  );
+
+  // Custom logic based on session
+  if (session.user?.role === 'admin') {
+    const response = NextResponse.rewrite(
+      new URL('/admin/dashboard', request.url),
+      { request: { headers: requestHeaders } }
+    );
+    applyResponseHeaders(response, responseHeaders);
+    return response;
+  }
+
+  // Default response
+  const response = NextResponse.next({
+    request: { headers: requestHeaders },
+  });
+  applyResponseHeaders(response, responseHeaders);
+  return response;
+}
+```
+
+## Usage with dynamic rewrites
+
+Rewrite based on authentication state:
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  authkit,
+  partitionAuthkitHeaders,
+  applyResponseHeaders,
+} from '@workos-inc/authkit-nextjs';
+
+export default async function proxy(request: NextRequest) {
+  const { session, headers } = await authkit(request);
+  const { requestHeaders, responseHeaders } = partitionAuthkitHeaders(
+    request,
+    headers
+  );
+  const { pathname } = request.nextUrl;
+
+  // Rewrite /app to user-specific path
+  if (pathname === '/app' && session.user) {
+    const userPath = `/users/${session.user.id}/dashboard`;
+    const response = NextResponse.rewrite(
+      new URL(userPath, request.url),
+      { request: { headers: requestHeaders } }
+    );
+    applyResponseHeaders(response, responseHeaders);
+    return response;
+  }
+
+  // Default behavior
+  const response = NextResponse.next({
+    request: { headers: requestHeaders },
+  });
+  applyResponseHeaders(response, responseHeaders);
+  return response;
+}
+```
+
+## Security considerations
+
+This function automatically:
+
+- **Strips client-injected headers**: Any `x-workos-*` headers from the client are removed and replaced with trusted values from AuthKit
+- **Filters response headers**: Only allowlisted headers are included in `responseHeaders`
+- **Auto-sets cache headers**: `cache-control: no-store` is automatically added when cookies are present
+- **Merges Vary headers**: Multiple Vary values are deduplicated
+- **Prevents header leakage**: Internal session data is never exposed to the browser
+
+## Working with applyResponseHeaders
+
+The `applyResponseHeaders` helper applies the response headers to a NextResponse object:
+
+```typescript
+import { applyResponseHeaders } from '@workos-inc/authkit-nextjs';
+import { NextResponse } from 'next/server';
+
+// Create your response
+const response = NextResponse.next();
+
+// Apply AuthKit response headers
+applyResponseHeaders(response, responseHeaders);
+```
+
+It properly handles:
+- Multi-value headers (like `set-cookie`)
+- Merging Vary headers
+- Overriding vs. appending headers based on type
+
+## Important notes
+
+- Use `handleAuthkitHeaders` for most cases (simpler API)
+- Only use this for advanced patterns like rewrites
+- Always use `applyResponseHeaders` to apply the response headers
+- Never manually forward internal headers to the browser
+- The `requestHeaders` must be passed to the next handler for `withAuth()` to work
+- Response headers are safe to send to the browser (already filtered)

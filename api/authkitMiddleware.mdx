@@ -1,0 +1,137 @@
+---
+title: authkitMiddleware
+description: Create a Next.js middleware/proxy function that manages authentication for your application routes
+---
+
+## Overview
+
+The `authkitMiddleware` function creates a Next.js middleware (or proxy in Next.js 16+) that automatically manages authentication for your application routes. It handles session management, cookie refresh, and redirects unauthenticated users to AuthKit when needed.
+
+## Function signature
+
+```typescript
+function authkitMiddleware(options?: AuthkitMiddlewareOptions): NextMiddleware
+```
+
+## Parameters
+
+<ParamField path="options" type="AuthkitMiddlewareOptions" optional>
+  Configuration options for the middleware
+  
+  <ParamField path="redirectUri" type="string" optional>
+    Custom redirect URI for OAuth callback. Useful for dynamic environments like Vercel preview deployments. Overrides the `WORKOS_REDIRECT_URI` environment variable.
+  </ParamField>
+  
+  <ParamField path="middlewareAuth" type="object" optional>
+    Configure middleware-level authentication enforcement
+    
+    <ParamField path="enabled" type="boolean" default="false">
+      Enable middleware-level authentication. When true, all routes in the matcher require authentication unless listed in `unauthenticatedPaths`.
+    </ParamField>
+    
+    <ParamField path="unauthenticatedPaths" type="string[]" default="[]">
+      Array of path patterns that don't require authentication. Supports glob patterns like `/about` or `/blog/:path*`.
+    </ParamField>
+  </ParamField>
+  
+  <ParamField path="debug" type="boolean" default="false">
+    Enable debug logging for troubleshooting authentication issues.
+  </ParamField>
+  
+  <ParamField path="signUpPaths" type="string[]" default="[]">
+    Array of path patterns that should use the sign-up screen hint when redirecting to AuthKit. Supports glob patterns.
+  </ParamField>
+  
+  <ParamField path="eagerAuth" type="boolean" default="false">
+    Enable synchronous access token availability on initial page load. Required by some third-party services. When enabled, temporarily stores the access token in a 30-second cookie for immediate client-side access.
+  </ParamField>
+</ParamField>
+
+## Return value
+
+<ResponseField name="middleware" type="NextMiddleware">
+  A Next.js middleware function that can be exported as the default export from your `middleware.ts` (Next.js ≤15) or `proxy.ts` (Next.js 16+) file.
+</ResponseField>
+
+## Basic usage
+
+```typescript
+// middleware.ts (Next.js ≤15) or proxy.ts (Next.js 16+)
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+// Match against pages that require auth
+export const config = { matcher: ['/', '/dashboard'] };
+```
+
+## Usage with middleware auth
+
+Protect all routes except specific public pages:
+
+```typescript
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/', '/about', '/pricing'],
+  },
+});
+
+export const config = {
+  matcher: ['/', '/dashboard/:path*', '/about', '/pricing'],
+};
+```
+
+## Usage with custom redirect URI
+
+Dynamically set the redirect URI for preview deployments:
+
+```typescript
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  redirectUri: process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}/callback`
+    : 'http://localhost:3000/callback',
+});
+
+export const config = { matcher: ['/dashboard/:path*'] };
+```
+
+## Usage with sign-up paths
+
+Direct users to the sign-up screen for specific routes:
+
+```typescript
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  signUpPaths: ['/account/sign-up', '/onboarding/:path*'],
+});
+
+export const config = { matcher: ['/account/:path*', '/onboarding/:path*'] };
+```
+
+## Usage with eager auth
+
+Enable synchronous token access for third-party services:
+
+```typescript
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  eagerAuth: true,
+});
+
+export const config = { matcher: ['/dashboard/:path*'] };
+```
+
+## Important notes
+
+- The middleware must be in the root of your project (not in `src` or `app` directories)
+- Use a `config.matcher` to specify which routes should be processed
+- Avoid catch-all matchers like `['/:path*']` that can intercept static assets and break styling
+- For broad protection, use: `matcher: ['/((?!_next/static|_next/image|favicon.ico).*)']`
+- In Next.js 16+, the file should be named `proxy.ts` instead of `middleware.ts`

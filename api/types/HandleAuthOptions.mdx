@@ -1,0 +1,145 @@
+---
+title: 'HandleAuthOptions'
+description: 'Configuration options for the authentication callback handler'
+---
+
+The `HandleAuthOptions` type configures the `handleAuth` callback route handler that processes authentication responses from WorkOS.
+
+## Type definition
+
+```typescript
+interface HandleAuthOptions {
+  returnPathname?: string;
+  baseURL?: string;
+  onSuccess?: (data: HandleAuthSuccessData) => void | Promise<void>;
+  onError?: (params: { error?: unknown; request: NextRequest }) => Response | Promise<Response>;
+}
+```
+
+## Properties
+
+<ParamField path="returnPathname" type="string" default="/">
+  The pathname to redirect users to after successful authentication. This can include query parameters.
+  
+  If a `returnPathname` was specified in the authorization URL state, it will override this value.
+</ParamField>
+
+<ParamField path="baseURL" type="string">
+  The base URL for your application. Useful when running in containerized environments (like Docker) where the request hostname may differ from the actual application URL.
+  
+  If provided, must be a valid URL (e.g., `https://example.com`).
+</ParamField>
+
+<ParamField path="onSuccess" type="(data: HandleAuthSuccessData) => void | Promise<void>">
+  Callback function invoked after successful authentication, before redirecting the user. Use this to perform custom actions like logging, analytics, or database updates.
+  
+  Receives [HandleAuthSuccessData](#handleauthsuccessdata) containing the session and authentication details.
+</ParamField>
+
+<ParamField path="onError" type="(params: { error?: unknown; request: NextRequest }) => Response | Promise<Response>">
+  Custom error handler for authentication failures. If not provided, displays a default error page.
+  
+  Must return a `Response` object to send to the user.
+</ParamField>
+
+## HandleAuthSuccessData
+
+The data passed to the `onSuccess` callback extends [Session](/api/types/Session) with additional authentication metadata:
+
+```typescript
+interface HandleAuthSuccessData extends Session {
+  oauthTokens?: OauthTokens;
+  organizationId?: string;
+  authenticationMethod?: AuthenticationResponse['authenticationMethod'];
+  state?: string | undefined;
+}
+```
+
+<ResponseField name="oauthTokens" type="OauthTokens">
+  OAuth tokens if the authentication was performed via an OAuth provider (e.g., Google, Microsoft).
+</ResponseField>
+
+<ResponseField name="organizationId" type="string">
+  The ID of the organization the user authenticated with, if applicable.
+</ResponseField>
+
+<ResponseField name="authenticationMethod" type="string">
+  The method used for authentication (e.g., `"Password"`, `"GoogleOAuth"`, `"MagicLink"`).
+</ResponseField>
+
+<ResponseField name="state" type="string">
+  Custom state data that was passed to the authorization URL, if any.
+</ResponseField>
+
+## Usage
+
+### Basic configuration
+
+```typescript
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  returnPathname: '/dashboard',
+});
+```
+
+### With success callback
+
+```typescript
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  returnPathname: '/dashboard',
+  onSuccess: async (data) => {
+    // Log successful authentication
+    console.log(`User ${data.user.email} authenticated via ${data.authenticationMethod}`);
+    
+    // Store user in database
+    await db.users.upsert({
+      where: { id: data.user.id },
+      update: { lastLogin: new Date() },
+      create: {
+        id: data.user.id,
+        email: data.user.email,
+        firstName: data.user.firstName,
+        lastName: data.user.lastName,
+      },
+    });
+  },
+});
+```
+
+### With custom error handling
+
+```typescript
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+import { NextResponse } from 'next/server';
+
+export const GET = handleAuth({
+  returnPathname: '/dashboard',
+  onError: async ({ error, request }) => {
+    console.error('Authentication error:', error);
+    
+    // Redirect to custom error page with error details
+    const url = new URL('/auth/error', request.url);
+    url.searchParams.set('message', 'Authentication failed');
+    
+    return NextResponse.redirect(url);
+  },
+});
+```
+
+### With baseURL for Docker
+
+```typescript
+import { handleAuth } from '@workos-inc/authkit-nextjs';
+
+export const GET = handleAuth({
+  baseURL: process.env.PUBLIC_URL || 'https://example.com',
+  returnPathname: '/dashboard',
+});
+```
+
+## Related functions
+
+- `handleAuth()` - Creates the authentication callback handler (see source at ~/workspace/source/src/authkit-callback-route.ts:44)

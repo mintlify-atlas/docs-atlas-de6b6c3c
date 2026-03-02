@@ -1,0 +1,418 @@
+---
+title: Middleware options
+description: Configure authkitMiddleware behavior for route protection, debugging, redirects, and authentication strategies
+---
+
+The `authkitMiddleware()` function accepts configuration options to control authentication behavior, route protection, and debugging. This guide covers all available options.
+
+## Configuration overview
+
+```typescript
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  redirectUri: string,              // Custom redirect URI
+  middlewareAuth: {                  // Enforce auth at middleware level
+    enabled: boolean,
+    unauthenticatedPaths: string[],
+  },
+  debug: boolean,                    // Enable debug logging
+  signUpPaths: string[],            // Paths that trigger sign-up flow
+  eagerAuth: boolean,               // Enable synchronous token access
+});
+```
+
+## Options reference
+
+### redirectUri
+
+**Type:** `string`  
+**Default:** `undefined` (uses `NEXT_PUBLIC_WORKOS_REDIRECT_URI`)
+
+Override the OAuth callback URI dynamically. Useful for preview deployments or multi-environment setups.
+
+```typescript
+export default authkitMiddleware({
+  redirectUri: 'https://preview-abc123.example.com/callback',
+});
+```
+
+<Accordion title="Use case: Vercel preview deployments">
+  ```typescript
+  const redirectUri = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}/callback`
+    : process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI;
+
+  export default authkitMiddleware({
+    redirectUri,
+  });
+  ```
+</Accordion>
+
+<Warning>
+  The custom redirect URI must be configured in your WorkOS dashboard under "Redirects".
+</Warning>
+
+### middlewareAuth
+
+**Type:** `object`  
+**Default:** `undefined` (auth is opt-in via `withAuth`)
+
+Enforce authentication at the middleware level instead of requiring `withAuth` calls in each component.
+
+<ParamField path="middlewareAuth.enabled" type="boolean" required>
+  Enable middleware-level authentication enforcement.
+</ParamField>
+
+<ParamField path="middlewareAuth.unauthenticatedPaths" type="string[]" required>
+  Array of path patterns that don't require authentication. Uses [Next.js matcher syntax](https://nextjs.org/docs/app/building-your-application/routing/middleware#matcher).
+</ParamField>
+
+#### Example: Secure by default
+
+```typescript
+export default authkitMiddleware({
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/', '/about', '/pricing'],
+  },
+});
+
+export const config = {
+  matcher: ['/', '/about', '/pricing', '/dashboard/:path*', '/admin/:path*'],
+};
+```
+
+In this setup:
+- `/`, `/about`, `/pricing` are public
+- `/dashboard/*` and `/admin/*` require authentication
+- Unauthenticated users are redirected to WorkOS AuthKit
+
+#### Path patterns
+
+<Tabs>
+  <Tab title="Exact paths">
+    ```typescript
+    unauthenticatedPaths: ['/', '/about', '/contact']
+    ```
+    
+    Matches only exact paths.
+  </Tab>
+  
+  <Tab title="Wildcard patterns">
+    ```typescript
+    unauthenticatedPaths: ['/blog/:path*', '/docs/:slug*']
+    ```
+    
+    - `/blog/:path*` matches `/blog`, `/blog/post-1`, `/blog/category/tech`, etc.
+    - `/docs/:slug*` matches `/docs`, `/docs/guide`, `/docs/api/reference`, etc.
+  </Tab>
+  
+  <Tab title="Mixed patterns">
+    ```typescript
+    unauthenticatedPaths: [
+      '/',
+      '/about',
+      '/blog/:path*',
+      '/api/public/:path*',
+    ]
+    ```
+    
+    Combine exact paths and wildcards.
+  </Tab>
+</Tabs>
+
+<Note>
+  When `middlewareAuth` is enabled, you don't need to call `withAuth({ ensureSignedIn: true })` in your pages. Authentication is handled by middleware.
+</Note>
+
+### debug
+
+**Type:** `boolean`  
+**Default:** `false`
+
+Enable debug logging for authentication flow, session management, and token refresh.
+
+```typescript
+export default authkitMiddleware({
+  debug: true,
+});
+```
+
+#### Debug output examples
+
+```
+[AuthKit] Session found for user: user_01H1234567890
+[AuthKit] Access token expires in 845 seconds
+[AuthKit] Refreshing session with refresh token
+[AuthKit] Session refresh successful
+[AuthKit] Redirecting unauthenticated user to AuthKit
+```
+
+<Tip>
+  Enable debug mode in development to troubleshoot authentication issues. Disable in production to avoid logging sensitive information.
+</Tip>
+
+### signUpPaths
+
+**Type:** `string[]`  
+**Default:** `[]`
+
+Specify paths that should trigger the sign-up screen hint in AuthKit instead of the sign-in screen.
+
+```typescript
+export default authkitMiddleware({
+  signUpPaths: ['/signup', '/register', '/join'],
+});
+```
+
+When unauthenticated users visit these paths:
+- They're redirected to AuthKit with `screen_hint=sign-up`
+- The AuthKit UI displays the sign-up form by default
+- Users can still switch to sign-in if they have an account
+
+#### Example: Dedicated sign-up page
+
+```typescript
+// middleware.ts
+export default authkitMiddleware({
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/'],
+  },
+  signUpPaths: ['/signup', '/get-started'],
+});
+
+export const config = {
+  matcher: ['/', '/signup', '/get-started', '/dashboard/:path*'],
+};
+```
+
+Paths `/signup` and `/get-started` require auth but show the sign-up screen.
+
+### eagerAuth
+
+**Type:** `boolean`  
+**Default:** `false`
+
+Enable synchronous access token availability for third-party services that need immediate token access.
+
+```typescript
+export default authkitMiddleware({
+  eagerAuth: true,
+});
+```
+
+When enabled:
+- Access token is stored in a 30-second cookie on page load
+- Client components can access tokens synchronously via `getAccessToken()`
+- Token cookie is immediately consumed and deleted
+
+See the [Eager auth guide](/advanced/eager-auth) for detailed usage and security considerations.
+
+<Warning>
+  Eager auth makes tokens briefly accessible via JavaScript. Only enable if you need synchronous token access for third-party services.
+</Warning>
+
+## Complete examples
+
+### Basic setup
+
+Minimal configuration for most applications:
+
+```typescript
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+export const config = {
+  matcher: ['/dashboard/:path*', '/admin/:path*'],
+};
+```
+
+Authentication is opt-in via `withAuth({ ensureSignedIn: true })` in pages.
+
+### Secure by default
+
+Protect all routes except specific public pages:
+
+```typescript
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: [
+      '/',
+      '/about',
+      '/pricing',
+      '/blog/:path*',
+      '/docs/:path*',
+    ],
+  },
+});
+
+export const config = {
+  matcher: [
+    '/',
+    '/about',
+    '/pricing',
+    '/blog/:path*',
+    '/docs/:path*',
+    '/dashboard/:path*',
+    '/app/:path*',
+  ],
+};
+```
+
+### Development with debugging
+
+Enable debug logging for troubleshooting:
+
+```typescript
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+const isDevelopment = process.env.NODE_ENV === 'development';
+
+export default authkitMiddleware({
+  debug: isDevelopment,
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/', '/test'],
+  },
+});
+
+export const config = {
+  matcher: ['/', '/test', '/app/:path*'],
+};
+```
+
+### Multi-environment with preview deployments
+
+Handle preview deployments with dynamic redirect URIs:
+
+```typescript
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+const getRedirectUri = () => {
+  // Vercel preview deployment
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}/callback`;
+  }
+  
+  // Netlify preview deployment
+  if (process.env.DEPLOY_PRIME_URL) {
+    return `${process.env.DEPLOY_PRIME_URL}/callback`;
+  }
+  
+  // Default from environment variable
+  return process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI;
+};
+
+export default authkitMiddleware({
+  redirectUri: getRedirectUri(),
+  debug: process.env.NODE_ENV === 'development',
+});
+
+export const config = {
+  matcher: ['/dashboard/:path*'],
+};
+```
+
+### Sign-up focused paths
+
+Differentiate sign-in vs sign-up flows:
+
+```typescript
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  middlewareAuth: {
+    enabled: true,
+    unauthenticatedPaths: ['/', '/signin'],
+  },
+  signUpPaths: ['/signup', '/join', '/register', '/get-started'],
+});
+
+export const config = {
+  matcher: [
+    '/',
+    '/signin',
+    '/signup',
+    '/join',
+    '/register', 
+    '/get-started',
+    '/dashboard/:path*',
+  ],
+};
+```
+
+- `/signin` → Shows sign-in screen
+- `/signup`, `/join`, `/register`, `/get-started` → Show sign-up screen
+- `/` → Public (no redirect)
+
+## Matcher configuration
+
+The `matcher` export controls which routes run through middleware. It's separate from middleware options but works together.
+
+### Best practices
+
+<AccordionGroup>
+  <Accordion title="Be specific with matchers">
+    Avoid catch-all matchers that intercept static assets:
+    
+    ```typescript
+    // ❌ Bad: Intercepts everything
+    export const config = {
+      matcher: ['/:path*'],
+    };
+    
+    // ✅ Good: Specific paths only
+    export const config = {
+      matcher: ['/dashboard/:path*', '/api/:path*'],
+    };
+    ```
+  </Accordion>
+
+  <Accordion title="Exclude static assets">
+    If you need broad matching, exclude Next.js internals:
+    
+    ```typescript
+    export const config = {
+      matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+    };
+    ```
+  </Accordion>
+
+  <Accordion title="Match authenticated routes only">
+    For performance, only run middleware on routes that need authentication:
+    
+    ```typescript
+    export const config = {
+      matcher: ['/dashboard/:path*', '/admin/:path*', '/api/private/:path*'],
+    };
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="Environment variables" icon="gear" href="/configuration/environment-variables">
+    Required and optional environment variables
+  </Card>
+  <Card title="Middleware concepts" icon="layer-group" href="/core-concepts/middleware">
+    How middleware works
+  </Card>
+  <Card title="Composable middleware" icon="code-branch" href="/advanced/composable-middleware">
+    Advanced middleware patterns
+  </Card>
+  <Card title="Protecting routes" icon="shield" href="/guides/protecting-routes">
+    Route protection strategies
+  </Card>
+</CardGroup>

@@ -1,0 +1,147 @@
+---
+title: "Impersonation"
+description: "Visual indicator component that displays when an admin is impersonating a user"
+---
+
+`Impersonation` is a client-side React component that displays a banner when an administrator is impersonating a user. It shows the impersonated user's details and provides a button to stop the impersonation.
+
+## Usage
+
+```tsx
+import { Impersonation } from '@workos-inc/authkit-nextjs';
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>
+        <AuthKitProvider>
+          <Impersonation />
+          {children}
+        </AuthKitProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+## Props
+
+<ParamField path="side" type="'top' | 'bottom'" default="'bottom'">
+  Position of the impersonation banner on the screen.
+
+  ```tsx
+  <Impersonation side="top" />
+  ```
+</ParamField>
+
+<ParamField path="returnTo" type="string">
+  URL to redirect to after stopping impersonation. If not provided, the user will be redirected to the default location.
+
+  ```tsx
+  <Impersonation returnTo="/admin/users" />
+  ```
+</ParamField>
+
+<ParamField path="...props" type="React.ComponentPropsWithoutRef<'div'>">
+  All standard HTML div attributes are supported and will be passed to the root element.
+</ParamField>
+
+## Styling
+
+The component supports CSS custom properties for customization:
+
+```css
+:root {
+  --workos-impersonation-size: 4px; /* Base size unit (min: 2px, max: 15px) */
+  --workos-impersonation-background-color: #fce654; /* Banner background */
+  --workos-impersonation-color: #1a1600; /* Text color */
+  --workos-impersonation-border-color: #e0c36c; /* Border color */
+  --workos-impersonation-border-width: 1px; /* Border thickness */
+}
+```
+
+### Example: Custom styling
+
+```tsx
+<Impersonation
+  side="top"
+  style={{
+    '--workos-impersonation-background-color': '#ff6b6b',
+    '--workos-impersonation-color': '#ffffff',
+    '--workos-impersonation-border-color': '#c92a2a',
+  }}
+/>
+```
+
+## Behavior
+
+<AccordionGroup>
+  <Accordion title="Automatic display">
+    The component automatically renders when the current user is being impersonated. It remains hidden when no impersonation is active.
+  </Accordion>
+
+  <Accordion title="Organization context">
+    If the impersonated user is in an organization, the banner displays both the user's email and the organization name.
+  </Accordion>
+
+  <Accordion title="Minimize/maximize">
+    The banner includes a toggle button to minimize it to a small indicator, reducing visual clutter while maintaining awareness of the impersonation state.
+  </Accordion>
+
+  <Accordion title="Stop impersonation">
+    Clicking the **Stop** button ends the impersonation session and signs out the impersonated user, returning to the admin's session.
+  </Accordion>
+</AccordionGroup>
+
+## Implementation details
+
+The component:
+
+- Uses `useAuth()` to access impersonation state
+- Fetches organization details when the user is in an organization context
+- Renders nothing when not impersonating
+- Creates a fixed-position overlay with a minimizable form
+- Handles sign-out with optional redirect
+
+## Example with both positions
+
+```tsx
+import { Impersonation } from '@workos-inc/authkit-nextjs';
+
+export default function Layout({ children }) {
+  const showTopBanner = process.env.NEXT_PUBLIC_BANNER_POSITION === 'top';
+
+  return (
+    <html lang="en">
+      <body>
+        <AuthKitProvider>
+          <Impersonation 
+            side={showTopBanner ? 'top' : 'bottom'}
+            returnTo="/admin/dashboard"
+          />
+          {children}
+        </AuthKitProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+## Accessibility
+
+The component is built with semantic HTML and includes:
+
+- Proper form structure for the stop button
+- Clear visual indicators of impersonation state
+- Keyboard-accessible controls
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="useAuth" icon="react" href="/api/useAuth">
+    Access impersonation state
+  </Card>
+  <Card title="Impersonation guide" icon="user-secret" href="/guides/impersonation">
+    Learn about user impersonation
+  </Card>
+</CardGroup>

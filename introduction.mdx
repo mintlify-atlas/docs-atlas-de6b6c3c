@@ -1,0 +1,149 @@
+---
+title: AuthKit Next.js
+description: Authentication and session management for Next.js with WorkOS & AuthKit
+---
+
+The AuthKit library for Next.js provides convenient helpers for authentication and session management using WorkOS & AuthKit with Next.js App Router.
+
+<Note>
+This library is designed specifically for the Next.js App Router. For Pages Router support, refer to the WorkOS Node SDK.
+</Note>
+
+## What you'll build
+
+AuthKit Next.js gives you everything you need to add enterprise-ready authentication to your Next.js application:
+
+<CardGroup cols={2}>
+  <Card title="Secure authentication" icon="lock">
+    Enterprise SSO, social login, and email/password authentication out of the box
+  </Card>
+  <Card title="Session management" icon="clock-rotate-left">
+    Automatic token refresh and secure cookie-based sessions with zero configuration
+  </Card>
+  <Card title="Server & client hooks" icon="code">
+    Access user data in both server and client components with `withAuth()` and `useAuth()`
+  </Card>
+  <Card title="Advanced features" icon="puzzle-piece">
+    User impersonation, feature flags, organization switching, and API key validation
+  </Card>
+</CardGroup>
+
+## Quick links
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the package and configure your environment variables
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get authentication working in under 5 minutes
+  </Card>
+  <Card title="API reference" icon="book">
+    Explore all available methods and components
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/workos/authkit-nextjs">
+    View source code and contribute to the project
+  </Card>
+</CardGroup>
+
+## Key features
+
+### Built for Next.js App Router
+
+Designed from the ground up for Next.js 13+ with full support for:
+- Server Components and Server Actions
+- React Server Components (RSC)
+- Next.js 16+ proxy and middleware patterns
+- Streaming and concurrent rendering
+
+### Enterprise-ready authentication
+
+Powered by WorkOS AuthKit, you get:
+- Single Sign-On (SSO) with major providers
+- Social authentication (Google, GitHub, Microsoft)
+- Magic link and email/password authentication
+- Multi-factor authentication (MFA)
+- User impersonation for support scenarios
+
+### Simple developer experience
+
+```tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function DashboardPage() {
+  const { user } = await withAuth();
+  
+  return <div>Welcome, {user?.firstName}!</div>;
+}
+```
+
+Access authenticated user data in any server component with a single function call. No prop drilling, no context providers required for server components.
+
+### Flexible middleware
+
+Protect routes with a simple matcher configuration:
+
+```ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+export const config = { 
+  matcher: ['/dashboard/:path*', '/account'] 
+};
+```
+
+Automatic session refresh, token management, and redirect handling with zero boilerplate.
+
+## Use cases
+
+<AccordionGroup>
+  <Accordion title="B2B SaaS applications">
+    AuthKit Next.js is perfect for B2B applications that need enterprise SSO, organization management, and user impersonation for customer support.
+  </Accordion>
+  
+  <Accordion title="Internal tools and dashboards">
+    Quickly add authentication to internal tools with support for your company's existing SSO providers.
+  </Accordion>
+  
+  <Accordion title="Multi-tenant applications">
+    Built-in support for organization switching and session management across multiple tenants.
+  </Accordion>
+  
+  <Accordion title="API services">
+    Includes `validateApiKey()` for securing public API endpoints with WorkOS API keys.
+  </Accordion>
+</AccordionGroup>
+
+## Architecture
+
+AuthKit Next.js follows a middleware-first architecture:
+
+1. **Middleware layer** - Handles session refresh and authentication checks before requests reach your pages
+2. **Callback route** - Processes OAuth callbacks from WorkOS AuthKit
+3. **Server helpers** - Access session data in Server Components with `withAuth()`
+4. **Client hooks** - Access session data in Client Components with `useAuth()`
+5. **Secure storage** - Encrypted session cookies using iron-session
+
+## Browser and Next.js support
+
+AuthKit Next.js supports:
+- Next.js 13.5.9+ (App Router required)
+- Next.js 14, 15, and 16
+- React 18 and 19
+- All modern browsers (Chrome, Firefox, Safari, Edge)
+
+## Next steps
+
+<Steps>
+  <Step title="Install the package">
+    Follow the [installation guide](/installation) to add AuthKit to your Next.js project
+  </Step>
+  
+  <Step title="Complete the quickstart">
+    Get authentication working in under 5 minutes with the [quickstart guide](/quickstart)
+  </Step>
+  
+  <Step title="Explore advanced features">
+    Learn about user impersonation, feature flags, and organization management
+  </Step>
+</Steps>

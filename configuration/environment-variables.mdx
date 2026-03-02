@@ -1,0 +1,200 @@
+---
+title: Environment variables
+description: Configure AuthKit Next.js with environment variables for authentication, API settings, and cookie behavior
+---
+
+AuthKit Next.js uses environment variables to configure authentication, API connectivity, and cookie settings. This guide covers all available environment variables and their configuration options.
+
+## Required variables
+
+These environment variables must be set for AuthKit to function:
+
+<ParamField path="WORKOS_CLIENT_ID" type="string" required>
+  Your WorkOS client ID. Retrieved from the [WorkOS dashboard](https://dashboard.workos.com).
+  
+  Example: `client_01H1234567890ABCDEFGHIJKLM`
+</ParamField>
+
+<ParamField path="WORKOS_API_KEY" type="string" required>
+  Your WorkOS API key. Retrieved from the [WorkOS dashboard](https://dashboard.workos.com).
+  
+  Example: `sk_test_1234567890abcdefghijklmnopqrstuvwxyz`
+  
+  <Warning>
+    Never commit API keys to version control. Use environment variables or secret management systems.
+  </Warning>
+</ParamField>
+
+<ParamField path="WORKOS_COOKIE_PASSWORD" type="string" required>
+  A secret password used to encrypt session cookies. Must be at least 32 characters long.
+  
+  <Tip>
+    Generate a secure password using:
+    ```bash
+    openssl rand -base64 24
+    ```
+    Or use a password generator like [1Password](https://1password.com/password-generator/).
+  </Tip>
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_WORKOS_REDIRECT_URI" type="string" required>
+  The callback URL where users are redirected after authentication. Must be configured in your WorkOS dashboard under "Redirects".
+  
+  Example: `http://localhost:3000/callback` (development) or `https://yourdomain.com/callback` (production)
+  
+  <Note>
+    This must be a `NEXT_PUBLIC_` variable because it's used in both server and client contexts.
+  </Note>
+</ParamField>
+
+## Optional variables
+
+### Cookie configuration
+
+<ParamField path="WORKOS_COOKIE_MAX_AGE" type="number" default="34560000">
+  Maximum age of the session cookie in seconds. Default is 400 days (the maximum allowed by Chrome).
+  
+  The actual session duration is controlled by the access and refresh tokens, not the cookie expiry.
+  
+  ```sh
+  WORKOS_COOKIE_MAX_AGE='86400'  # 1 day
+  ```
+</ParamField>
+
+<ParamField path="WORKOS_COOKIE_DOMAIN" type="string" default={null}>
+  Domain for the session cookie. When empty, the cookie is only valid for the current domain.
+  
+  ```sh
+  WORKOS_COOKIE_DOMAIN='example.com'  # Valid for example.com and subdomains
+  ```
+  
+  <Tip>
+    Use this to share sessions between multiple subdomains or applications. All apps must use the same `WORKOS_COOKIE_PASSWORD`.
+  </Tip>
+</ParamField>
+
+<ParamField path="WORKOS_COOKIE_NAME" type="string" default="wos-session">
+  Name of the session cookie.
+  
+  ```sh
+  WORKOS_COOKIE_NAME='my-auth-cookie'
+  ```
+</ParamField>
+
+<ParamField path="WORKOS_COOKIE_SAMESITE" type="string" default="lax">
+  SameSite attribute for cookies. Options: `lax`, `strict`, or `none`.
+  
+  ```sh
+  WORKOS_COOKIE_SAMESITE='strict'
+  ```
+  
+  <Warning>
+    Setting `WORKOS_COOKIE_SAMESITE='none'` allows cookies to be sent in cross-origin contexts (like iframes), but reduces protection against CSRF attacks. This setting forces cookies to be secure (HTTPS only) and should only be used when absolutely necessary for your application architecture.
+  </Warning>
+</ParamField>
+
+### API configuration
+
+<ParamField path="WORKOS_API_HOSTNAME" type="string" default="api.workos.com">
+  Base hostname for WorkOS API calls. Useful for custom deployments or proxies.
+  
+  ```sh
+  WORKOS_API_HOSTNAME='api.custom-domain.com'
+  ```
+</ParamField>
+
+<ParamField path="WORKOS_API_HTTPS" type="boolean" default={true}>
+  Whether to use HTTPS for API calls. Should almost always be `true`.
+  
+  ```sh
+  WORKOS_API_HTTPS='false'  # Only for local development
+  ```
+</ParamField>
+
+<ParamField path="WORKOS_API_PORT" type="number" default={null}>
+  Port to use for API calls. When not set, uses standard ports (443 for HTTPS, 80 for HTTP).
+  
+  ```sh
+  WORKOS_API_PORT='8443'
+  ```
+</ParamField>
+
+## Example configuration
+
+### Development (.env.local)
+
+```sh
+# Required
+WORKOS_CLIENT_ID="client_01H1234567890ABCDEFGHIJKLM"
+WORKOS_API_KEY="sk_test_1234567890abcdefghijklmnopqrstuvwxyz"
+WORKOS_COOKIE_PASSWORD="complex-password-at-least-32-characters-long"
+NEXT_PUBLIC_WORKOS_REDIRECT_URI="http://localhost:3000/callback"
+
+# Optional - shorter session for development
+WORKOS_COOKIE_MAX_AGE="3600"  # 1 hour
+```
+
+### Production
+
+```sh
+# Required
+WORKOS_CLIENT_ID="client_01H9876543210ZYXWVUTSRQPON"
+WORKOS_API_KEY="sk_live_9876543210zyxwvutsrqponmlkjihgfedcba"
+WORKOS_COOKIE_PASSWORD="your-secure-production-password-here-min-32-chars"
+NEXT_PUBLIC_WORKOS_REDIRECT_URI="https://yourdomain.com/callback"
+
+# Optional - custom cookie settings
+WORKOS_COOKIE_DOMAIN="yourdomain.com"
+WORKOS_COOKIE_SAMESITE="strict"
+```
+
+## Security best practices
+
+<AccordionGroup>
+  <Accordion title="Never commit secrets to version control">
+    Use `.env.local` for local development and add it to `.gitignore`. For production, use your hosting platform's environment variable management (Vercel, AWS Parameter Store, etc.).
+  </Accordion>
+
+  <Accordion title="Use different credentials per environment">
+    Maintain separate WorkOS projects for development, staging, and production with different client IDs and API keys.
+  </Accordion>
+
+  <Accordion title="Rotate API keys regularly">
+    Periodically generate new API keys in the WorkOS dashboard and update your environment variables.
+  </Accordion>
+
+  <Accordion title="Generate strong cookie passwords">
+    Use cryptographically secure random strings for `WORKOS_COOKIE_PASSWORD`. Never reuse passwords across projects.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<Accordion title="Invalid cookie password length">
+  **Error:** `Cookie password must be at least 32 characters long`
+  
+  **Solution:** Generate a longer password using `openssl rand -base64 24` or a password manager.
+</Accordion>
+
+<Accordion title="Redirect URI mismatch">
+  **Error:** `redirect_uri_mismatch` during authentication
+  
+  **Solution:** Ensure `NEXT_PUBLIC_WORKOS_REDIRECT_URI` exactly matches the redirect URI configured in your WorkOS dashboard, including the protocol (http/https) and path.
+</Accordion>
+
+<Accordion title="Session not persisting across requests">
+  **Issue:** User is signed out immediately after authentication
+  
+  **Solution:** Check that your `WORKOS_COOKIE_DOMAIN` is correctly set. If using a subdomain, ensure the domain matches (e.g., `example.com` for `app.example.com`).
+</Accordion>
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="Cookie settings" icon="cookie" href="/configuration/cookie-settings">
+    Advanced cookie configuration and security
+  </Card>
+  <Card title="Middleware options" icon="layer-group" href="/configuration/middleware-options">
+    Configure middleware behavior
+  </Card>
+</CardGroup>

@@ -1,0 +1,255 @@
+---
+title: "Eager auth"
+description: "Enable synchronous access to authentication tokens on initial page load for third-party services"
+---
+
+The `eagerAuth` option enables synchronous access to authentication tokens on initial page load. This is required by some third-party services that need immediate token access without an asynchronous fetch.
+
+## When to use eager auth
+
+Use eager auth when:
+
+- Integrating with third-party services that validate tokens directly with WorkOS
+- Building real-time features that need immediate authentication on load
+- You want to avoid loading states on initial page render
+- Third-party client libraries require synchronous token access during initialization
+
+For most use cases, the standard asynchronous `useAccessToken()` hook is sufficient and more secure.
+
+## How it works
+
+When `eagerAuth: true` is enabled, the middleware temporarily stores the access token in a short-lived cookie:
+
+- Cookie name: `workos-access-token`
+- Max age: 30 seconds
+- Only set on initial document loads (not API, RSC, or prefetch requests)
+- Immediately consumed and deleted by the client after first read
+- Available synchronously on the first render
+
+The token is automatically synchronized with the main session cookie and refreshed when needed.
+
+## Setup
+
+### Enable in middleware
+
+Enable eager auth in your middleware configuration:
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  eagerAuth: true,
+});
+
+export const config = { matcher: ['/', '/app/:path*'] };
+```
+
+### Enable in composable middleware
+
+If using composable middleware, pass the option to `authkit()`:
+
+```ts
+// middleware.ts
+import { NextRequest } from 'next/server';
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+
+export default async function middleware(request: NextRequest) {
+  const { session, headers, authorizationUrl } = await authkit(request, {
+    eagerAuth: true,
+  });
+
+  if (request.nextUrl.pathname.startsWith('/app') && !session.user) {
+    return handleAuthkitHeaders(request, headers, { redirect: authorizationUrl });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+```
+
+## Usage in client components
+
+Access the token synchronously using the `getAccessToken()` method:
+
+```tsx
+'use client';
+
+import { useAccessToken } from '@workos-inc/authkit-nextjs/components';
+import { useEffect } from 'react';
+
+function ThirdPartyClient() {
+  const { getAccessToken } = useAccessToken();
+
+  useEffect(() => {
+    // Token is available immediately on initial page load
+    const token = getAccessToken();
+
+    if (token) {
+      // Initialize third-party service with immediate token access
+      thirdPartyClient.authenticate(token);
+    }
+  }, []);
+
+  return <div>Third-party client initialized</div>;
+}
+```
+
+## Complete example
+
+Here's a complete example integrating eager auth with a real-time messaging service:
+
+```tsx
+'use client';
+
+import { useAccessToken } from '@workos-inc/authkit-nextjs/components';
+import { useEffect, useState } from 'react';
+import { RealtimeClient } from '@example/realtime-client';
+
+function RealtimeMessaging() {
+  const { getAccessToken, accessToken } = useAccessToken();
+  const [client, setClient] = useState<RealtimeClient | null>(null);
+  const [messages, setMessages] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Get token synchronously on mount
+    const token = getAccessToken();
+
+    if (token) {
+      // Initialize client with token - no loading state needed
+      const realtimeClient = new RealtimeClient({
+        token,
+        onMessage: (message) => {
+          setMessages((prev) => [...prev, message]);
+        },
+      });
+
+      setClient(realtimeClient);
+      realtimeClient.connect();
+
+      return () => {
+        realtimeClient.disconnect();
+      };
+    }
+  }, []);
+
+  // Automatically update client when token refreshes
+  useEffect(() => {
+    if (client && accessToken) {
+      client.updateAuth(accessToken);
+    }
+  }, [accessToken, client]);
+
+  return (
+    <div>
+      <h2>Messages</h2>
+      {messages.map((msg, i) => (
+        <div key={i}>{msg}</div>
+      ))}
+    </div>
+  );
+}
+```
+
+## Token lifecycle
+
+1. **Initial page load**: Middleware sets `workos-access-token` cookie (30-second lifetime)
+2. **First render**: `getAccessToken()` reads and immediately deletes the cookie
+3. **Subsequent renders**: Token is maintained in memory by `useAccessToken()`
+4. **Refresh**: When the session refreshes, the token updates automatically
+
+The eager auth cookie is:
+- Only created on document requests (not API calls, RSC requests, or prefetches)
+- Automatically deleted after first read
+- Never persisted beyond 30 seconds
+- Synchronized with the main session cookie
+
+## Security considerations
+
+<Warning>
+Eager auth makes tokens briefly accessible via JavaScript (30-second window) to enable synchronous access. This is a common pattern used by many authentication libraries.
+</Warning>
+
+### Best practices
+
+- Implement a Content Security Policy (CSP) if handling sensitive data
+- Review all third-party scripts on authenticated pages
+- Only enable eager auth when synchronous access is required
+- Use the standard async `useAccessToken()` hook when a brief loading state is acceptable
+
+### Standard XSS protections
+
+Ensure your application has standard XSS protections:
+
+- Sanitize user input before rendering
+- Use Content Security Policy headers
+- Avoid `dangerouslySetInnerHTML` with untrusted content
+- Keep dependencies updated
+
+## When not to use eager auth
+
+Avoid eager auth when:
+
+- You can tolerate a brief loading state while fetching the token
+- You're only making API calls from the client (use standard async token fetch)
+- You don't have third-party services requiring synchronous token access
+- Your application handles highly sensitive data and you want to minimize token exposure
+
+## Standard async token access
+
+For most use cases, use the standard async approach:
+
+```tsx
+'use client';
+
+import { useAccessToken } from '@workos-inc/authkit-nextjs/components';
+
+function ApiClient() {
+  const { accessToken, loading, error } = useAccessToken();
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!accessToken) return <div>Not authenticated</div>;
+
+  // Use token for API calls
+  return <div>Ready to make API calls</div>;
+}
+```
+
+This approach:
+- Doesn't expose tokens in cookies
+- Has better security posture
+- Is sufficient for most authentication needs
+
+## Comparison: eager vs. standard auth
+
+| Feature | Eager auth | Standard async |
+| --- | --- | --- |
+| **Token availability** | Synchronous, immediate | Async, brief loading state |
+| **Cookie exposure** | 30-second window | No token in cookies |
+| **Use case** | Third-party services, real-time | API calls, standard auth |
+| **Security** | Good (with CSP) | Better (no cookie exposure) |
+| **Setup complexity** | Add one option | None (default) |
+
+## Debugging
+
+Enable debug logs to track eager auth behavior:
+
+```ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  eagerAuth: true,
+  debug: true,
+});
+```
+
+This logs:
+- When the eager auth cookie is set
+- Session refresh events
+- Token validation results
+
+## Related resources
+
+- [Composable middleware](/advanced/composable-middleware) - Build custom middleware
+- [useAccessToken hook](/api/useAccessToken) - Standard token access patterns
+- [Custom flows](/advanced/custom-flows) - Implement custom authentication flows

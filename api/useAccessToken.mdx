@@ -1,0 +1,317 @@
+---
+title: "useAccessToken"
+description: "React hook that manages access tokens with automatic refresh"
+---
+
+`useAccessToken` is a client-side React hook that provides access to the user's JWT access token with automatic refresh capabilities. It handles token expiration, background refreshes, and provides both synchronous and asynchronous access patterns.
+
+## Usage
+
+```tsx
+'use client';
+
+import { useAccessToken } from '@workos-inc/authkit-nextjs';
+
+export function ApiExample() {
+  const { accessToken, loading, getAccessToken } = useAccessToken();
+
+  const fetchData = async () => {
+    // Get fresh token for API call
+    const token = await getAccessToken();
+    
+    const response = await fetch('/api/data', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    return response.json();
+  };
+
+  return <button onClick={fetchData}>Fetch Data</button>;
+}
+```
+
+## Return value
+
+<ResponseField name="accessToken" type="string | undefined">
+  The current access token. May be stale when the tab is inactive. Use this for display purposes or where eventual consistency is acceptable. For API calls, prefer `getAccessToken()`.
+
+  ```tsx
+  const { accessToken } = useAccessToken();
+  console.log('Current token:', accessToken);
+  ```
+</ResponseField>
+
+<ResponseField name="loading" type="boolean">
+  Indicates whether the initial token fetch is in progress. This is `true` when the hook first loads and is fetching the token.
+
+  ```tsx
+  const { loading } = useAccessToken();
+  
+  if (loading) {
+    return <div>Loading authentication...</div>;
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="error" type="Error | null">
+  Error from the last token operation, or `null` if no error occurred.
+
+  ```tsx
+  const { error } = useAccessToken();
+  
+  if (error) {
+    return <div>Authentication error: {error.message}</div>;
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="refresh" type="() => Promise<string | undefined>">
+  Manually trigger a token refresh. Forces a new token to be fetched regardless of expiration status.
+
+  ```tsx
+  const { refresh } = useAccessToken();
+  
+  const handleRefresh = async () => {
+    const newToken = await refresh();
+    console.log('Refreshed token:', newToken);
+  };
+  ```
+</ResponseField>
+
+<ResponseField name="getAccessToken" type="() => Promise<string | undefined>">
+  Get a guaranteed fresh access token. Automatically refreshes if the current token is expired or about to expire. Use this for API calls where token freshness is critical.
+
+  Returns a Promise resolving to a fresh token, or `undefined` if not authenticated.
+
+  ```tsx
+  const { getAccessToken } = useAccessToken();
+  
+  const callApi = async () => {
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+      
+      await fetch('/api/protected', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+    } catch (error) {
+      console.error('API call failed:', error);
+    }
+  };
+  ```
+</ResponseField>
+
+## Token refresh behavior
+
+The hook automatically refreshes tokens in the following scenarios:
+
+<AccordionGroup>
+  <Accordion title="On mount">
+    When the component first mounts, the hook fetches a fresh token if none exists or if the current token is expiring.
+  </Accordion>
+
+  <Accordion title="User or session change">
+    When the user or session changes, the hook clears the old token and fetches a new one.
+  </Accordion>
+
+  <Accordion title="Tab activation">
+    When the browser tab becomes visible or gains focus, the hook checks if the token needs refreshing.
+  </Accordion>
+
+  <Accordion title="Network reconnection">
+    When the browser comes back online after being offline.
+  </Accordion>
+
+  <Accordion title="Page show event">
+    When the page is restored from the browser's back/forward cache.
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+### Making authenticated API requests
+
+```tsx
+'use client';
+
+import { useAccessToken } from '@workos-inc/authkit-nextjs';
+
+export function DataFetcher() {
+  const { getAccessToken, loading } = useAccessToken();
+  const [data, setData] = useState(null);
+
+  const fetchData = async () => {
+    const token = await getAccessToken();
+    if (!token) return;
+
+    const response = await fetch('/api/user-data', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    const result = await response.json();
+    setData(result);
+  };
+
+  return (
+    <div>
+      <button onClick={fetchData} disabled={loading}>
+        Fetch Data
+      </button>
+      {data && <pre>{JSON.stringify(data, null, 2)}</pre>}
+    </div>
+  );
+}
+```
+
+### Handling token errors
+
+```tsx
+'use client';
+
+import { useAccessToken } from '@workos-inc/authkit-nextjs';
+
+export function ProtectedContent() {
+  const { accessToken, loading, error } = useAccessToken();
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  if (error) {
+    return (
+      <div>
+        <p>Failed to get access token: {error.message}</p>
+        <button onClick={() => window.location.reload()}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!accessToken) {
+    return <div>Please sign in to continue</div>;
+  }
+
+  return <div>Protected content</div>;
+}
+```
+
+### Manual token refresh
+
+```tsx
+'use client';
+
+import { useAccessToken } from '@workos-inc/authkit-nextjs';
+
+export function TokenManager() {
+  const { accessToken, refresh, loading } = useAccessToken();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+      console.log('Token refreshed successfully');
+    } catch (error) {
+      console.error('Failed to refresh token:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  return (
+    <div>
+      <p>Token: {accessToken?.substring(0, 20)}...</p>
+      <button onClick={handleRefresh} disabled={loading || refreshing}>
+        {refreshing ? 'Refreshing...' : 'Refresh Token'}
+      </button>
+    </div>
+  );
+}
+```
+
+### Using with custom fetch wrapper
+
+```tsx
+'use client';
+
+import { useAccessToken } from '@workos-inc/authkit-nextjs';
+
+export function useAuthenticatedFetch() {
+  const { getAccessToken } = useAccessToken();
+
+  const authFetch = async (url: string, options: RequestInit = {}) => {
+    const token = await getAccessToken();
+    
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    return fetch(url, {
+      ...options,
+      headers: {
+        ...options.headers,
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+  };
+
+  return authFetch;
+}
+
+// Usage
+export function MyComponent() {
+  const authFetch = useAuthenticatedFetch();
+
+  const loadData = async () => {
+    const response = await authFetch('/api/protected');
+    return response.json();
+  };
+
+  return <button onClick={loadData}>Load Data</button>;
+}
+```
+
+## When to use accessToken vs getAccessToken
+
+<Card title="Use accessToken" icon="eye">
+  For display purposes, logging, or non-critical operations where eventual consistency is acceptable. The token is kept in sync but may be slightly stale during background operations.
+</Card>
+
+<Card title="Use getAccessToken" icon="lock">
+  For API calls, authentication headers, or any operation requiring a guaranteed fresh token. This method ensures the token is valid before returning it.
+</Card>
+
+## Important notes
+
+<Warning>
+  This hook must be used within a component that is a child of `AuthKitProvider`. It will throw an error if used outside the provider.
+</Warning>
+
+<Info>
+  The hook automatically clears tokens when the user signs out or the session changes, preventing stale token usage.
+</Info>
+
+<Tip>
+  For server-side access token needs, use the `withAuth` function which returns the access token directly.
+</Tip>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="useAuth" icon="react" href="/api/useAuth">
+    Access full authentication context
+  </Card>
+  <Card title="useTokenClaims" icon="file-certificate" href="/api/useTokenClaims">
+    Decode and access token claims
+  </Card>
+  <Card title="withAuth" icon="server" href="/api/withAuth">
+    Server-side authentication
+  </Card>
+</CardGroup>

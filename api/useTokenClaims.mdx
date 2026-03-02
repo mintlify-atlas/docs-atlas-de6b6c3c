@@ -1,0 +1,354 @@
+---
+title: "useTokenClaims"
+description: "React hook that decodes and returns claims from the access token"
+---
+
+`useTokenClaims` is a client-side React hook that decodes the JWT access token and returns its claims. This is useful for accessing custom claims, standard JWT fields, or WorkOS-specific data embedded in the token.
+
+## Usage
+
+```tsx
+'use client';
+
+import { useTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export function UserInfo() {
+  const { sub, org_id, role, permissions } = useTokenClaims();
+
+  return (
+    <div>
+      <p>User ID: {sub}</p>
+      <p>Organization: {org_id}</p>
+      <p>Role: {role}</p>
+      <p>Permissions: {permissions?.join(', ')}</p>
+    </div>
+  );
+}
+```
+
+## Signature
+
+```typescript
+function useTokenClaims<T = Record<string, unknown>>(): TokenClaims<T>;
+
+type TokenClaims<T> = Partial<JWTPayload & T>;
+```
+
+## Type parameters
+
+<ParamField path="T" type="Record<string, unknown>" default="Record<string, unknown>">
+  Type definition for custom claims in your token. This allows you to add type safety for custom fields you've added to the JWT.
+
+  ```tsx
+  interface CustomClaims {
+    customField: string;
+    subscriptionTier: 'free' | 'pro' | 'enterprise';
+  }
+
+  const claims = useTokenClaims<CustomClaims>();
+  
+  // TypeScript knows about custom fields
+  console.log(claims.customField);
+  console.log(claims.subscriptionTier);
+  ```
+</ParamField>
+
+## Return value
+
+Returns an object containing the decoded JWT claims. All fields are optional since the token may not exist or may not contain all claims.
+
+### Standard JWT claims
+
+<ResponseField name="sid" type="string">
+  Session ID of the JWT, used to identify the session.
+</ResponseField>
+
+<ResponseField name="iss" type="string">
+  Issuer of the JWT. For WorkOS, this is typically your WorkOS API URL.
+</ResponseField>
+
+<ResponseField name="sub" type="string">
+  Subject of the JWT, representing the user ID.
+</ResponseField>
+
+<ResponseField name="aud" type="string | string[]">
+  Audience of the JWT, indicating the intended recipients.
+</ResponseField>
+
+<ResponseField name="exp" type="number">
+  Expiration time of the JWT, represented as a Unix timestamp (seconds since epoch).
+
+  ```tsx
+  const { exp } = useTokenClaims();
+  
+  if (exp) {
+    const expiresAt = new Date(exp * 1000);
+    console.log('Token expires at:', expiresAt);
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="iat" type="number">
+  Issued at time of the JWT, represented as a Unix timestamp.
+
+  ```tsx
+  const { iat } = useTokenClaims();
+  
+  if (iat) {
+    const issuedAt = new Date(iat * 1000);
+    console.log('Token issued at:', issuedAt);
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="jti" type="string">
+  JWT ID, a unique identifier for this specific token.
+</ResponseField>
+
+### WorkOS-specific claims
+
+<ResponseField name="org_id" type="string">
+  Organization ID associated with the JWT.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  The user's role in the organization.
+</ResponseField>
+
+<ResponseField name="roles" type="string[]">
+  Array of all roles assigned to the user.
+</ResponseField>
+
+<ResponseField name="permissions" type="string[]">
+  Array of permissions granted to the user.
+</ResponseField>
+
+## Examples
+
+### Basic usage
+
+```tsx
+'use client';
+
+import { useTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export function TokenInfo() {
+  const claims = useTokenClaims();
+
+  if (Object.keys(claims).length === 0) {
+    return <div>No token available</div>;
+  }
+
+  return (
+    <div>
+      <h2>Token Claims</h2>
+      <pre>{JSON.stringify(claims, null, 2)}</pre>
+    </div>
+  );
+}
+```
+
+### Using custom claims
+
+```tsx
+'use client';
+
+import { useTokenClaims } from '@workos-inc/authkit-nextjs';
+
+interface MyCustomClaims {
+  department: string;
+  employeeId: string;
+  accessLevel: number;
+}
+
+export function EmployeeInfo() {
+  const claims = useTokenClaims<MyCustomClaims>();
+
+  return (
+    <div>
+      <p>Department: {claims.department}</p>
+      <p>Employee ID: {claims.employeeId}</p>
+      <p>Access Level: {claims.accessLevel}</p>
+    </div>
+  );
+}
+```
+
+### Permission-based UI
+
+```tsx
+'use client';
+
+import { useTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export function AdminControls() {
+  const { permissions } = useTokenClaims();
+
+  const canDelete = permissions?.includes('resources:delete');
+  const canEdit = permissions?.includes('resources:edit');
+  const canView = permissions?.includes('resources:view');
+
+  return (
+    <div>
+      {canView && <button>View Resources</button>}
+      {canEdit && <button>Edit Resources</button>}
+      {canDelete && <button>Delete Resources</button>}
+    </div>
+  );
+}
+```
+
+### Token expiration check
+
+```tsx
+'use client';
+
+import { useTokenClaims } from '@workos-inc/authkit-nextjs';
+import { useEffect, useState } from 'react';
+
+export function TokenExpirationWarning() {
+  const { exp } = useTokenClaims();
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!exp) return;
+
+    const updateTimeRemaining = () => {
+      const remaining = exp - Math.floor(Date.now() / 1000);
+      setTimeRemaining(remaining);
+    };
+
+    updateTimeRemaining();
+    const interval = setInterval(updateTimeRemaining, 1000);
+
+    return () => clearInterval(interval);
+  }, [exp]);
+
+  if (!timeRemaining || timeRemaining > 300) {
+    return null; // Don't show warning if more than 5 minutes remain
+  }
+
+  return (
+    <div className="warning">
+      Your session will expire in {Math.floor(timeRemaining / 60)} minutes
+    </div>
+  );
+}
+```
+
+### Role-based access
+
+```tsx
+'use client';
+
+import { useTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export function RoleBasedContent() {
+  const { role, roles } = useTokenClaims();
+
+  const isAdmin = role === 'admin' || roles?.includes('admin');
+  const isModerator = role === 'moderator' || roles?.includes('moderator');
+
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      
+      {/* Everyone sees this */}
+      <section>
+        <h2>Public Content</h2>
+      </section>
+
+      {/* Only moderators and admins */}
+      {(isModerator || isAdmin) && (
+        <section>
+          <h2>Moderation Tools</h2>
+        </section>
+      )}
+
+      {/* Only admins */}
+      {isAdmin && (
+        <section>
+          <h2>Admin Panel</h2>
+        </section>
+      )}
+    </div>
+  );
+}
+```
+
+### Combining with useAccessToken
+
+```tsx
+'use client';
+
+import { useTokenClaims, useAccessToken } from '@workos-inc/authkit-nextjs';
+
+export function TokenDebugger() {
+  const { accessToken } = useAccessToken();
+  const claims = useTokenClaims();
+
+  const copyToken = () => {
+    if (accessToken) {
+      navigator.clipboard.writeText(accessToken);
+    }
+  };
+
+  return (
+    <div>
+      <h2>Token Information</h2>
+      
+      <div>
+        <h3>Raw Token</h3>
+        <button onClick={copyToken}>Copy Token</button>
+        <pre style={{ wordBreak: 'break-all' }}>
+          {accessToken?.substring(0, 50)}...
+        </pre>
+      </div>
+
+      <div>
+        <h3>Decoded Claims</h3>
+        <pre>{JSON.stringify(claims, null, 2)}</pre>
+      </div>
+    </div>
+  );
+}
+```
+
+## How it works
+
+The hook:
+
+1. Uses `useAccessToken` internally to get the current access token
+2. Decodes the JWT token using base64url decoding
+3. Parses the payload as JSON
+4. Returns the claims object
+5. Automatically updates when the token changes
+6. Returns an empty object if no token is available or decoding fails
+
+## Important notes
+
+<Warning>
+  This hook only **decodes** the token, it does not **verify** its signature. Token verification is handled server-side by WorkOS. Never rely on client-side token claims for security decisions.
+</Warning>
+
+<Info>
+  The hook uses `useMemo` internally to avoid unnecessary re-decoding of the same token.
+</Info>
+
+<Tip>
+  For server-side access to token claims, use the `getTokenClaims` function which performs the same decoding on the server.
+</Tip>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="useAccessToken" icon="key" href="/api/useAccessToken">
+    Get the raw access token
+  </Card>
+  <Card title="useAuth" icon="react" href="/api/useAuth">
+    Access authentication context
+  </Card>
+  <Card title="getTokenClaims" icon="server" href="/api/getTokenClaims">
+    Server-side token claims
+  </Card>
+</CardGroup>

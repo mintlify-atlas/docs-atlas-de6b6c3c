@@ -1,0 +1,273 @@
+---
+title: validateApiKey
+description: Validate a WorkOS API key from a Bearer token
+---
+
+`validateApiKey` validates an API key sent via Bearer Authentication in the `Authorization` header. This is useful for securing public API endpoints with WorkOS API keys.
+
+## Usage
+
+```typescript
+import { validateApiKey } from '@workos-inc/authkit-nextjs';
+
+const { apiKey } = await validateApiKey();
+```
+
+## Signature
+
+```typescript
+async function validateApiKey(): Promise<{
+  apiKey: ApiKey | null;
+}>
+```
+
+## Parameters
+
+This function takes no parameters. It automatically reads the `Authorization` header from the incoming request.
+
+## Returns
+
+<ResponseField name="apiKey" type="ApiKey | null">
+  The validated API key object from WorkOS, or `null` if no valid key is found.
+  
+  <Expandable title="ApiKey properties">
+    <ResponseField name="id" type="string">
+      The unique identifier for the API key.
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      The name of the API key.
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp when the key was created.
+    </ResponseField>
+    
+    <ResponseField name="updatedAt" type="string">
+      ISO 8601 timestamp when the key was last updated.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Basic API endpoint protection
+
+```typescript
+import { NextResponse } from 'next/server';
+import { validateApiKey } from '@workos-inc/authkit-nextjs';
+
+export async function GET() {
+  const { apiKey } = await validateApiKey();
+  
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
+  
+  return NextResponse.json({ success: true });
+}
+```
+
+### Public API with rate limiting
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { validateApiKey } from '@workos-inc/authkit-nextjs';
+
+export async function GET(req: NextRequest) {
+  const { apiKey } = await validateApiKey();
+  
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: 'API key required' },
+      { status: 401 }
+    );
+  }
+  
+  // Track usage by API key
+  await trackApiUsage(apiKey.id);
+  
+  // Check rate limit
+  const isRateLimited = await checkRateLimit(apiKey.id);
+  if (isRateLimited) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded' },
+      { status: 429 }
+    );
+  }
+  
+  return NextResponse.json({ data: 'your data' });
+}
+```
+
+### Webhook endpoint validation
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { validateApiKey } from '@workos-inc/authkit-nextjs';
+
+export async function POST(req: NextRequest) {
+  const { apiKey } = await validateApiKey();
+  
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: 'Invalid API key' },
+      { status: 401 }
+    );
+  }
+  
+  const webhook = await req.json();
+  
+  // Process webhook with authenticated context
+  await processWebhook(webhook, apiKey.id);
+  
+  return NextResponse.json({ received: true });
+}
+```
+
+### Logging API key usage
+
+```typescript
+import { NextResponse } from 'next/server';
+import { validateApiKey } from '@workos-inc/authkit-nextjs';
+
+export async function GET() {
+  const { apiKey } = await validateApiKey();
+  
+  if (!apiKey) {
+    await logUnauthorizedAccess();
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
+  
+  // Log successful API access
+  await logApiAccess({
+    keyId: apiKey.id,
+    keyName: apiKey.name,
+    timestamp: new Date().toISOString(),
+  });
+  
+  return NextResponse.json({ data: 'protected resource' });
+}
+```
+
+### Multi-tenant API
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { validateApiKey } from '@workos-inc/authkit-nextjs';
+
+export async function GET(req: NextRequest) {
+  const { apiKey } = await validateApiKey();
+  
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: 'Authentication required' },
+      { status: 401 }
+    );
+  }
+  
+  // Look up tenant by API key
+  const tenant = await getTenantByApiKey(apiKey.id);
+  
+  if (!tenant) {
+    return NextResponse.json(
+      { error: 'Invalid tenant' },
+      { status: 403 }
+    );
+  }
+  
+  // Return tenant-specific data
+  const data = await getTenantData(tenant.id);
+  
+  return NextResponse.json(data);
+}
+```
+
+### Custom error messages
+
+```typescript
+import { NextResponse } from 'next/server';
+import { validateApiKey } from '@workos-inc/authkit-nextjs';
+
+export async function GET() {
+  const { apiKey } = await validateApiKey();
+  
+  if (!apiKey) {
+    return NextResponse.json(
+      {
+        error: 'Unauthorized',
+        message: 'Please provide a valid API key in the Authorization header',
+        example: 'Authorization: Bearer sk_test_xxxxx',
+      },
+      {
+        status: 401,
+        headers: {
+          'WWW-Authenticate': 'Bearer realm="API"',
+        },
+      }
+    );
+  }
+  
+  return NextResponse.json({ success: true });
+}
+```
+
+### Scoped API access
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { validateApiKey } from '@workos-inc/authkit-nextjs';
+
+interface ApiKeyScopes {
+  read: boolean;
+  write: boolean;
+  admin: boolean;
+}
+
+export async function POST(req: NextRequest) {
+  const { apiKey } = await validateApiKey();
+  
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
+  
+  // Check if key has write scope
+  const scopes = await getApiKeyScopes(apiKey.id);
+  
+  if (!scopes.write) {
+    return NextResponse.json(
+      { error: 'Insufficient permissions' },
+      { status: 403 }
+    );
+  }
+  
+  const body = await req.json();
+  await createResource(body);
+  
+  return NextResponse.json({ created: true });
+}
+```
+
+## How it works
+
+1. The function reads the `Authorization` header from the incoming request
+2. It extracts the Bearer token value using the pattern `Bearer <token>`
+3. It calls the WorkOS API to validate the token
+4. Returns the validated API key object or `null` if validation fails
+
+## Notes
+
+- API keys must be sent in the `Authorization` header with the `Bearer` scheme
+- Returns `{ apiKey: null }` if the header is missing, malformed, or contains an invalid key
+- This function is specifically for validating WorkOS API keys, not user access tokens
+- API keys are typically used for server-to-server or public API authentication
+- For user authentication in your app, use `withAuth` instead

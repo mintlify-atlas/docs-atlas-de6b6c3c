@@ -1,0 +1,346 @@
+---
+title: Refreshing sessions
+description: Learn how to refresh user sessions and switch between organizations in your Next.js application
+---
+
+AuthKit automatically manages session refresh using refresh tokens. You can also manually refresh sessions or switch between organizations programmatically.
+
+## Automatic session refresh
+
+AuthKit automatically refreshes expired access tokens in the middleware using the refresh token. This happens transparently without user interaction.
+
+```ts
+// middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware();
+
+export const config = { matcher: ['/', '/dashboard/:path*'] };
+```
+
+When a user's access token expires, the middleware:
+
+1. Detects the expired token
+2. Calls WorkOS to refresh the session
+3. Updates the session cookie with new tokens
+4. Continues the request seamlessly
+
+<Note>
+Access tokens are JWT tokens that expire after a set period. Refresh tokens are long-lived and used to obtain new access tokens without re-authentication.
+</Note>
+
+## Manual session refresh (server)
+
+Use `refreshSession` in server actions or API routes to manually refresh the user's session:
+
+```ts
+'use server';
+
+import { refreshSession } from '@workos-inc/authkit-nextjs';
+
+export async function updateUserSession() {
+  const { user, accessToken } = await refreshSession();
+
+  if (!user) {
+    return { error: 'Not authenticated' };
+  }
+
+  // Use the fresh access token
+  const response = await fetch('https://api.example.com/data', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  return response.json();
+}
+```
+
+## Manual session refresh (client)
+
+Use the `refreshAuth` method from the `useAuth` hook to refresh sessions in client components:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export default function RefreshButton() {
+  const { refreshAuth, user, loading } = useAuth();
+
+  const handleRefresh = async () => {
+    const result = await refreshAuth();
+    
+    if (result?.error) {
+      console.error('Failed to refresh:', result.error);
+    } else {
+      console.log('Session refreshed successfully');
+    }
+  };
+
+  if (!user) return null;
+
+  return (
+    <button onClick={handleRefresh} disabled={loading}>
+      {loading ? 'Refreshing...' : 'Refresh session'}
+    </button>
+  );
+}
+```
+
+## Switching organizations
+
+Users can be members of multiple organizations. Use the organization switching APIs to change the active organization context.
+
+<Steps>
+
+### Server-side organization switching
+
+Use `switchToOrganization` in server actions:
+
+```ts
+'use server';
+
+import { switchToOrganization } from '@workos-inc/authkit-nextjs';
+
+export async function switchOrg(organizationId: string) {
+  try {
+    const result = await switchToOrganization(organizationId, {
+      revalidationStrategy: 'path',
+    });
+
+    return { success: true, organizationId: result.organizationId };
+  } catch (error) {
+    return { error: 'Failed to switch organization' };
+  }
+}
+```
+
+### Client-side organization switching
+
+Use the `switchToOrganization` method from `useAuth`:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+import { useEffect } from 'react';
+
+export function OrganizationSwitcher({ organizations }: { organizations: Organization[] }) {
+  const { organizationId, switchToOrganization, loading } = useAuth();
+
+  useEffect(() => {
+    console.log('Current organization:', organizationId);
+  }, [organizationId]);
+
+  const handleSwitch = async (newOrgId: string) => {
+    const result = await switchToOrganization(newOrgId, {
+      revalidationStrategy: 'none',
+    });
+
+    if ('error' in result) {
+      console.error('Switch failed:', result.error);
+    } else {
+      console.log('Switched to:', result.organizationId);
+    }
+  };
+
+  return (
+    <select 
+      value={organizationId || ''} 
+      onChange={(e) => handleSwitch(e.target.value)}
+      disabled={loading}
+    >
+      {organizations.map((org) => (
+        <option key={org.id} value={org.id}>
+          {org.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+```
+
+### Revalidation strategies
+
+Control how Next.js revalidates cached data after switching organizations:
+
+```ts
+// Revalidate by path (default)
+await switchToOrganization('org_123', {
+  revalidationStrategy: 'path',
+  returnTo: '/dashboard',
+});
+
+// Revalidate by cache tags
+await switchToOrganization('org_123', {
+  revalidationStrategy: 'tag',
+  revalidationTags: ['user-data', 'org-settings'],
+});
+
+// No automatic revalidation
+await switchToOrganization('org_123', {
+  revalidationStrategy: 'none',
+});
+```
+
+</Steps>
+
+## Refreshing with organization context
+
+Refresh the session and switch organizations simultaneously:
+
+```tsx
+'use client';
+
+import { useAuth } from '@workos-inc/authkit-nextjs/components';
+
+export function OrganizationRefreshButton({ orgId }: { orgId: string }) {
+  const { refreshAuth } = useAuth();
+
+  const handleRefresh = async () => {
+    const result = await refreshAuth({
+      organizationId: orgId,
+      ensureSignedIn: true,
+    });
+
+    if (result?.error) {
+      alert(`Failed to refresh: ${result.error}`);
+    }
+  };
+
+  return (
+    <button onClick={handleRefresh}>
+      Refresh and switch to organization
+    </button>
+  );
+}
+```
+
+## Session refresh callbacks
+
+Monitor session refresh events using callbacks in the middleware:
+
+```ts
+import { authkit, handleAuthkitHeaders } from '@workos-inc/authkit-nextjs';
+import { NextRequest } from 'next/server';
+
+export default async function middleware(request: NextRequest) {
+  const { session, headers, authorizationUrl } = await authkit(request, {
+    onSessionRefreshSuccess: async ({ accessToken, user, impersonator }) => {
+      console.log(`Session refreshed for ${user.email}`);
+      
+      // Update last activity timestamp
+      await logActivity(user.id, 'session_refreshed');
+    },
+    onSessionRefreshError: async ({ error, request }) => {
+      console.error('Session refresh failed:', error);
+      
+      // Notify monitoring system
+      await notifyMonitoring('session_refresh_failed', {
+        url: request.url,
+        error: error.message,
+      });
+    },
+  });
+
+  if (!session.user && authorizationUrl) {
+    return handleAuthkitHeaders(request, headers, { redirect: authorizationUrl });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
+
+export const config = { matcher: ['/dashboard/:path*'] };
+```
+
+### Callback data
+
+The `onSessionRefreshSuccess` callback receives:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `accessToken` | `string` | The new access token |
+| `user` | `User` | Updated user object |
+| `impersonator` | `Impersonator` | Present if impersonating |
+| `organizationId` | `string` | Current organization context |
+
+The `onSessionRefreshError` callback receives:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `error` | `unknown` | The error that occurred |
+| `request` | `NextRequest` | The original request |
+
+## Handling refresh errors
+
+When a session refresh fails (e.g., refresh token expired or revoked), AuthKit automatically:
+
+1. Deletes the session cookie
+2. Redirects the user to AuthKit for re-authentication
+
+```tsx
+import { refreshSession } from '@workos-inc/authkit-nextjs';
+
+try {
+  const result = await refreshSession({ ensureSignedIn: true });
+  console.log('Refreshed for user:', result.user.email);
+} catch (error) {
+  // User will be redirected to sign in
+  console.error('Refresh failed:', error);
+}
+```
+
+## Getting fresh access tokens
+
+Use the `useAccessToken` hook for automatic token management in client components:
+
+```tsx
+'use client';
+
+import { useAccessToken } from '@workos-inc/authkit-nextjs/components';
+
+export default function ApiClient() {
+  const { accessToken, loading, error, refresh } = useAccessToken();
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!accessToken) return <div>Not authenticated</div>;
+
+  return (
+    <div>
+      <p>Token: {accessToken.substring(0, 10)}...</p>
+      <button onClick={refresh}>Refresh token</button>
+    </div>
+  );
+}
+```
+
+The `useAccessToken` hook automatically:
+
+- Fetches the current access token
+- Refreshes it when it expires
+- Synchronizes with the main auth session
+
+<Tip>
+The `useAccessToken` hook is perfect for integrating with third-party services that need direct access to the JWT token.
+</Tip>
+
+## Best practices
+
+<Warning>
+Do not store refresh tokens in localStorage or expose them to client-side JavaScript. AuthKit stores them securely in HTTP-only cookies.
+</Warning>
+
+<Tip>
+**When to manually refresh:**
+
+- Before making critical API calls that require the latest permissions
+- After updating user roles or permissions in your system
+- When switching between organizations
+- For real-time applications that need fresh authorization data
+</Tip>
+
+<Note>
+The `useAuth` hook's `refreshAuth` method updates the entire authentication session, while `useAccessToken` focuses solely on token management.
+</Note>

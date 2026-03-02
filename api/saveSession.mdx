@@ -1,0 +1,202 @@
+---
+title: saveSession
+description: Manually save a WorkOS session to a cookie
+---
+
+`saveSession` is an advanced function that manually saves a WorkOS authentication session to an encrypted cookie. It's designed for custom authentication flows that bypass the standard `handleAuth` callback.
+
+## Usage
+
+```typescript
+import { saveSession } from '@workos-inc/authkit-nextjs';
+
+await saveSession(authResponse, request);
+```
+
+## Signature
+
+```typescript
+async function saveSession(
+  sessionOrResponse: Session | AuthenticationResponse,
+  request: NextRequest | string
+): Promise<void>
+```
+
+## Parameters
+
+<ParamField path="sessionOrResponse" type="Session | AuthenticationResponse" required>
+  The WorkOS session or authentication response containing access token, refresh token, and user information.
+  
+  <Expandable title="Session properties">
+    <ParamField path="accessToken" type="string" required>
+      JWT access token from WorkOS.
+    </ParamField>
+    
+    <ParamField path="refreshToken" type="string" required>
+      Refresh token for renewing the session.
+    </ParamField>
+    
+    <ParamField path="user" type="User" required>
+      The authenticated user object.
+    </ParamField>
+    
+    <ParamField path="impersonator" type="Impersonator" optional>
+      Impersonator information if the session is an impersonation session.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="request" type="NextRequest | string" required>
+  Either a NextRequest object or a URL string, used to determine cookie settings (domain, secure flag, etc.).
+</ParamField>
+
+## Returns
+
+Returns `Promise<void>`. The function completes when the session cookie has been set.
+
+## Examples
+
+### Email verification flow
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { saveSession, getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function POST(req: NextRequest) {
+  const { code } = await req.json();
+  
+  // Authenticate with WorkOS using email verification
+  const authResponse = await getWorkOS().userManagement.authenticateWithEmailVerification({
+    clientId: process.env.WORKOS_CLIENT_ID!,
+    code,
+  });
+  
+  // Manually save the session
+  await saveSession(authResponse, req);
+  
+  return NextResponse.json({ success: true });
+}
+```
+
+### Magic link authentication
+
+```typescript
+import { NextRequest } from 'next/server';
+import { saveSession, getWorkOS } from '@workos-inc/authkit-nextjs';
+import { redirect } from 'next/navigation';
+
+export async function GET(req: NextRequest) {
+  const token = req.nextUrl.searchParams.get('token');
+  
+  if (!token) {
+    return new Response('Missing token', { status: 400 });
+  }
+  
+  // Verify the magic link token
+  const authResponse = await getWorkOS().userManagement.authenticateWithMagicAuth({
+    clientId: process.env.WORKOS_CLIENT_ID!,
+    code: token,
+  });
+  
+  // Save the session
+  await saveSession(authResponse, req);
+  
+  redirect('/dashboard');
+}
+```
+
+### Token exchange flow
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { saveSession, getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function POST(req: NextRequest) {
+  const { exchangeToken } = await req.json();
+  
+  // Exchange token for WorkOS session
+  const authResponse = await getWorkOS().userManagement.authenticateWithToken({
+    clientId: process.env.WORKOS_CLIENT_ID!,
+    token: exchangeToken,
+  });
+  
+  // Save the session with NextRequest
+  await saveSession(authResponse, req);
+  
+  return NextResponse.redirect(new URL('/welcome', req.url));
+}
+```
+
+### Using with URL string
+
+```typescript
+import { saveSession } from '@workos-inc/authkit-nextjs';
+
+async function customAuthFlow(authResponse: AuthenticationResponse) {
+  // Save session using URL string instead of NextRequest
+  await saveSession(
+    authResponse,
+    'https://app.example.com/callback'
+  );
+}
+```
+
+### Self-hosted AuthKit integration
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { saveSession } from '@workos-inc/authkit-nextjs';
+
+export async function POST(req: NextRequest) {
+  const { accessToken, refreshToken, user, impersonator } = await req.json();
+  
+  // Manually construct session from self-hosted AuthKit response
+  await saveSession(
+    {
+      accessToken,
+      refreshToken,
+      user,
+      impersonator,
+    },
+    req
+  );
+  
+  return NextResponse.json({ success: true });
+}
+```
+
+### Webhook-based authentication
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { saveSession, getWorkOS } from '@workos-inc/authkit-nextjs';
+
+export async function POST(req: NextRequest) {
+  const webhook = await req.json();
+  
+  if (webhook.event === 'user.created') {
+    // Auto-authenticate newly created user
+    const authResponse = await getWorkOS().userManagement.authenticateWithPassword({
+      clientId: process.env.WORKOS_CLIENT_ID!,
+      email: webhook.data.email,
+      password: webhook.data.temporaryPassword,
+    });
+    
+    await saveSession(authResponse, req);
+    
+    return NextResponse.json({ authenticated: true });
+  }
+  
+  return NextResponse.json({ authenticated: false });
+}
+```
+
+## Notes
+
+- This is an advanced API for specific integration scenarios
+- Most applications should use `handleAuth()` instead, which calls `saveSession` automatically
+- The session is encrypted using the `WORKOS_COOKIE_PASSWORD` environment variable
+- Cookie options (domain, secure, sameSite) are automatically determined from the request URL
+- When passing a URL string, it's used only to determine cookie settings, not for redirection
+- This function is particularly useful for self-hosted AuthKit implementations
+- The session cookie name is determined by the `WORKOS_COOKIE_NAME` environment variable (defaults to `'wos-session'`)

@@ -1,0 +1,246 @@
+---
+title: getTokenClaims
+description: Decode and retrieve JWT token claims from an access token
+---
+
+`getTokenClaims` decodes a JWT access token and returns its claims. This is useful for extracting custom claims or inspecting token contents without verifying the signature.
+
+## Usage
+
+```typescript
+import { getTokenClaims } from '@workos-inc/authkit-nextjs';
+
+const claims = await getTokenClaims();
+```
+
+## Signature
+
+```typescript
+async function getTokenClaims<T = Record<string, unknown>>(
+  accessToken?: string
+): Promise<Partial<JWTPayload & T>>
+```
+
+## Parameters
+
+<ParamField path="accessToken" type="string" optional>
+  The JWT access token to decode. If not provided, uses the access token from the current user's session (requires `withAuth` to be available).
+</ParamField>
+
+<ParamField path="T" type="type parameter" optional>
+  TypeScript generic type parameter for custom claims. Use this to get typed access to custom claims in your token.
+</ParamField>
+
+## Returns
+
+Returns a `Promise` containing the decoded JWT claims. The return type includes standard JWT payload fields and any custom claims.
+
+<ResponseField name="iss" type="string">
+  Token issuer (typically WorkOS).
+</ResponseField>
+
+<ResponseField name="sub" type="string">
+  Subject (user ID).
+</ResponseField>
+
+<ResponseField name="aud" type="string | string[]">
+  Audience (your client ID).
+</ResponseField>
+
+<ResponseField name="exp" type="number">
+  Expiration time (Unix timestamp).
+</ResponseField>
+
+<ResponseField name="iat" type="number">
+  Issued at time (Unix timestamp).
+</ResponseField>
+
+<ResponseField name="sid" type="string">
+  Session ID.
+</ResponseField>
+
+<ResponseField name="org_id" type="string">
+  Organization ID.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  User's role.
+</ResponseField>
+
+<ResponseField name="permissions" type="string[]">
+  Array of permissions.
+</ResponseField>
+
+<ResponseField name="entitlements" type="string[]">
+  Array of entitlements.
+</ResponseField>
+
+<ResponseField name="feature_flags" type="string[]">
+  Array of feature flags.
+</ResponseField>
+
+## Examples
+
+### Basic usage with current session
+
+```typescript
+import { getTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export default async function ProfilePage() {
+  const claims = await getTokenClaims();
+  
+  return (
+    <div>
+      <p>User ID: {claims.sub}</p>
+      <p>Session ID: {claims.sid}</p>
+      <p>Organization: {claims.org_id}</p>
+    </div>
+  );
+}
+```
+
+### Decoding a specific token
+
+```typescript
+import { getTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export async function validateToken(token: string) {
+  const claims = await getTokenClaims(token);
+  
+  // Check if token is expired
+  const isExpired = claims.exp ? claims.exp * 1000 < Date.now() : true;
+  
+  return {
+    valid: !isExpired,
+    userId: claims.sub,
+    expiresAt: claims.exp ? new Date(claims.exp * 1000) : null,
+  };
+}
+```
+
+### Accessing custom claims with TypeScript
+
+```typescript
+import { getTokenClaims } from '@workos-inc/authkit-nextjs';
+
+interface CustomClaims {
+  department: string;
+  employeeId: string;
+  accessLevel: number;
+}
+
+export async function getUserMetadata() {
+  const claims = await getTokenClaims<CustomClaims>();
+  
+  return {
+    department: claims.department,
+    employeeId: claims.employeeId,
+    accessLevel: claims.accessLevel,
+  };
+}
+```
+
+### Inspecting permissions
+
+```typescript
+import { getTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export async function checkPermissions(requiredPermissions: string[]) {
+  const claims = await getTokenClaims();
+  const userPermissions = claims.permissions || [];
+  
+  const hasAllPermissions = requiredPermissions.every((permission) =>
+    userPermissions.includes(permission)
+  );
+  
+  return {
+    hasAccess: hasAllPermissions,
+    missingPermissions: requiredPermissions.filter(
+      (p) => !userPermissions.includes(p)
+    ),
+  };
+}
+```
+
+### Logging token information
+
+```typescript
+import { getTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export async function logTokenInfo() {
+  const claims = await getTokenClaims();
+  
+  console.log('Token Information:', {
+    issuedAt: new Date((claims.iat || 0) * 1000),
+    expiresAt: new Date((claims.exp || 0) * 1000),
+    sessionId: claims.sid,
+    organizationId: claims.org_id,
+    role: claims.role,
+    permissions: claims.permissions,
+  });
+}
+```
+
+### API route with token validation
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { getTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export async function GET(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  const token = authHeader?.replace('Bearer ', '');
+  
+  if (!token) {
+    return NextResponse.json({ error: 'Missing token' }, { status: 401 });
+  }
+  
+  try {
+    const claims = await getTokenClaims(token);
+    
+    // Check token expiration
+    if (claims.exp && claims.exp * 1000 < Date.now()) {
+      return NextResponse.json({ error: 'Token expired' }, { status: 401 });
+    }
+    
+    // Check required permission
+    if (!claims.permissions?.includes('api:read')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    
+    return NextResponse.json({ data: 'protected data' });
+  } catch (error) {
+    return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+  }
+}
+```
+
+### Feature flag check
+
+```typescript
+import { getTokenClaims } from '@workos-inc/authkit-nextjs';
+
+export async function hasFeatureFlag(flagName: string): Promise<boolean> {
+  const claims = await getTokenClaims();
+  return claims.feature_flags?.includes(flagName) || false;
+}
+
+export default async function FeaturePage() {
+  const hasNewUI = await hasFeatureFlag('new-ui');
+  
+  return (
+    <div>
+      {hasNewUI ? <NewUIComponent /> : <LegacyUIComponent />}
+    </div>
+  );
+}
+```
+
+## Notes
+
+- This function decodes the token but does not verify its signature
+- For signature verification, the library automatically handles this in `withAuth` and other functions
+- Returns an empty object `{}` if no token is available
+- Custom claims can be added to tokens through WorkOS Directory Sync or custom integrations
+- All timestamps in JWT claims are Unix timestamps (seconds since epoch)
+- When called without arguments, requires that the route is covered by AuthKit middleware

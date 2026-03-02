@@ -1,0 +1,461 @@
+---
+title: 'Session management'
+description: 'Learn how AuthKit Next.js maintains user sessions, handles token refresh, and manages session lifecycle'
+keywords: ['session', 'tokens', 'refresh', 'jwt', 'access token', 'refresh token']
+---
+
+AuthKit Next.js provides robust session management that automatically handles token refresh, session validation, and secure storage. This page explains how sessions work and how to interact with them.
+
+## Session architecture
+
+A session in AuthKit consists of encrypted data stored in an HTTP-only cookie containing:
+
+- **Access token** - Short-lived JWT with user and authorization data
+- **Refresh token** - Long-lived token for obtaining new access tokens
+- **User object** - Basic user information (id, email, name, etc.)
+- **Impersonator** - Optional impersonation context (email and reason)
+
+```typescript
+interface Session {
+  accessToken: string;
+  refreshToken: string;
+  user: User;
+  impersonator?: Impersonator;
+}
+```
+
+<Info>
+Sessions are encrypted using `iron-session` with AES-256-GCM encryption. The cookie itself is unreadable without your `WORKOS_COOKIE_PASSWORD`.
+</Info>
+
+## Token lifecycle
+
+### Access tokens
+
+Access tokens are JWTs that contain all the authorization data your application needs:
+
+```typescript
+interface AccessToken {
+  sid: string;              // Session ID
+  org_id?: string;          // Organization ID
+  role?: string;            // User role
+  roles?: string[];         // Multiple roles
+  permissions?: string[];   // User permissions
+  entitlements?: string[];  // Active entitlements
+  feature_flags?: string[]; // Enabled feature flags
+}
+```
+
+Access tokens have a short lifetime (typically 5-10 minutes) and are automatically refreshed by the middleware.
+
+### Token verification
+
+Before trusting an access token, AuthKit verifies it against WorkOS's public JWKS:
+
+```typescript
+import { jwtVerify, createRemoteJWKSet } from 'jose';
+
+const JWKS = createRemoteJWKSet(
+  new URL(workos.userManagement.getJwksUrl(clientId))
+);
+
+const hasValidSession = await jwtVerify(accessToken, JWKS);
+```
+
+This ensures:
+- Token was issued by WorkOS
+- Token hasn't been tampered with
+- Token signature is valid
+- Token hasn't expired
+
+### Refresh tokens
+
+Refresh tokens are opaque strings that can be exchanged for new access tokens:
+
+```typescript
+const { accessToken, refreshToken, user, impersonator } = 
+  await workos.userManagement.authenticateWithRefreshToken({
+    clientId: WORKOS_CLIENT_ID,
+    refreshToken: session.refreshToken,
+    organizationId: session.organizationId,
+  });
+```
+
+Refresh tokens:
+- Are automatically used by middleware when access tokens expire
+- Remain valid until explicitly revoked
+- Are stored encrypted in the session cookie
+- Cannot be read by client-side JavaScript
+
+## Automatic session refresh
+
+The AuthKit middleware automatically handles token refresh without any action from your application.
+
+### How refresh works
+
+<Steps>
+  <Step title="Access token expiry detected">
+    Middleware attempts to verify the access token and detects it's expired
+  </Step>
+  <Step title="Refresh token exchange">
+    Middleware calls WorkOS API to exchange refresh token for new tokens
+  </Step>
+  <Step title="Session update">
+    New tokens are encrypted and saved to the session cookie
+  </Step>
+  <Step title="Request continues">
+    Original request continues with fresh session data
+  </Step>
+</Steps>
+
+Here's the implementation from `session.ts:262-325`:
+
+```typescript
+try {
+  // Access token expired, refresh it
+  const { accessToken, refreshToken, user, impersonator } =
+    await getWorkOS().userManagement.authenticateWithRefreshToken({
+      clientId: WORKOS_CLIENT_ID,
+      refreshToken: session.refreshToken,
+      organizationId: organizationIdFromAccessToken,
+    });
+
+  // Encrypt session with new tokens
+  const encryptedSession = await encryptSession({
+    accessToken,
+    refreshToken,
+    user,
+    impersonator,
+  });
+
+  // Update cookie
+  headers.append(
+    'Set-Cookie',
+    `${cookieName}=${encryptedSession}; ${getCookieOptions(request.url, true)}`
+  );
+  
+  // Call success hook if provided
+  options.onSessionRefreshSuccess?.({
+    accessToken,
+    user,
+    impersonator,
+    organizationId,
+  });
+
+  return { session: userInfo, headers };
+} catch (e) {
+  // Refresh failed, delete session and redirect to sign in
+  options.onSessionRefreshError?.({ error: e, request });
+  // ... cookie deletion logic
+}
+```
+
+<Warning>
+If refresh token validation fails (token expired, revoked, or invalid), the session is deleted and the user must sign in again.
+</Warning>
+
+### Refresh hooks
+
+You can hook into the refresh process to track when sessions are refreshed or when refresh fails:
+
+```typescript middleware.ts
+import { authkitMiddleware } from '@workos-inc/authkit-nextjs';
+
+export default authkitMiddleware({
+  onSessionRefreshSuccess: ({ accessToken, user, organizationId }) => {
+    console.log(`Session refreshed for user ${user.email}`);
+  },
+  onSessionRefreshError: ({ error, request }) => {
+    console.error('Failed to refresh session:', error);
+    // Send to monitoring service
+  },
+});
+```
+
+## Accessing session data
+
+### Using withAuth()
+
+The primary way to access session data is through the `withAuth()` helper:
+
+```typescript app/dashboard/page.tsx
+import { withAuth } from '@workos-inc/authkit-nextjs';
+
+export default async function DashboardPage() {
+  const { user, organizationId, permissions } = await withAuth();
+  
+  return (
+    <div>
+      <h1>Welcome, {user.firstName}!</h1>
+      <p>Organization: {organizationId}</p>
+    </div>
+  );
+}
+```
+
+The `withAuth()` function returns:
+
+```typescript
+interface UserInfo {
+  user: User;                  // Full user object
+  sessionId: string;           // Unique session identifier
+  organizationId?: string;     // Current organization
+  role?: string;               // Deprecated single role
+  roles?: string[];            // Array of roles
+  permissions?: string[];      // User permissions
+  entitlements?: string[];     // Active entitlements
+  featureFlags?: string[];     // Enabled feature flags
+  impersonator?: Impersonator; // Impersonation context
+  accessToken: string;         // Raw access token
+}
+```
+
+<Note>
+`withAuth()` requires the middleware to be running on the route. If middleware isn't configured, you'll get an error.
+</Note>
+
+### Handling signed-out users
+
+By default, `withAuth()` returns `{ user: null }` for signed-out users:
+
+```typescript
+const session = await withAuth();
+
+if (!session.user) {
+  // User is signed out
+  return <SignInPrompt />;
+}
+
+// User is signed in
+return <Dashboard user={session.user} />;
+```
+
+To automatically redirect signed-out users:
+
+```typescript
+const { user } = await withAuth({ ensureSignedIn: true });
+// User is guaranteed to be signed in here
+```
+
+### Reading session from cookies
+
+In advanced scenarios, you can read the session directly from cookies without middleware:
+
+```typescript
+import { getSessionFromCookie } from '@workos-inc/authkit-nextjs';
+
+const session = await getSessionFromCookie();
+
+if (session) {
+  const { user, accessToken } = session;
+  // Use session data
+}
+```
+
+<Warning>
+Direct cookie access bypasses automatic refresh. Use `withAuth()` instead unless you have a specific reason not to.
+</Warning>
+
+## Manual session refresh
+
+You can manually refresh a session to update user data or switch organizations.
+
+### Refreshing current session
+
+```typescript
+import { refreshSession } from '@workos-inc/authkit-nextjs';
+
+const updatedSession = await refreshSession();
+```
+
+This exchanges the refresh token for new tokens, which updates:
+- User profile information
+- Organization membership
+- Permissions and roles
+- Entitlements and feature flags
+
+### Switching organizations
+
+To switch the user's active organization:
+
+```typescript
+import { switchToOrganization } from '@workos-inc/authkit-nextjs';
+
+const session = await switchToOrganization('org_456', {
+  returnTo: '/dashboard',
+  revalidationStrategy: 'path',
+});
+```
+
+This refreshes the session with the new organization context and optionally revalidates the page cache.
+
+<Info>
+If the organization requires SSO enrollment or MFA, the user will be redirected to AuthKit to complete those requirements.
+</Info>
+
+## Session termination
+
+### Signing out
+
+To terminate a session and sign out the user:
+
+```typescript
+import { signOut } from '@workos-inc/authkit-nextjs';
+
+await signOut({ returnTo: '/goodbye' });
+```
+
+This performs several actions:
+
+<Steps>
+  <Step title="Extract session ID">
+    Retrieves the session ID from the access token
+  </Step>
+  <Step title="Delete cookie">
+    Removes the session cookie from the browser
+  </Step>
+  <Step title="Revoke session">
+    Calls WorkOS to revoke the session server-side
+  </Step>
+  <Step title="Redirect">
+    Redirects to the WorkOS logout URL, then back to your app
+  </Step>
+</Steps>
+
+Implementation from `auth.ts:80-108`:
+
+```typescript
+export async function signOut({ returnTo }: { returnTo?: string } = {}) {
+  let sessionId: string | undefined;
+
+  try {
+    const { sessionId: sid } = await withAuth();
+    sessionId = sid;
+  } catch (error) {
+    // Fallback: read session directly from cookie
+    const session = await getSessionFromCookie();
+    if (session && session.accessToken) {
+      const { sid } = decodeJwt<AccessToken>(session.accessToken);
+      sessionId = sid;
+    }
+  } finally {
+    const nextCookies = await cookies();
+    const cookieName = WORKOS_COOKIE_NAME || 'wos-session';
+    nextCookies.delete({ name: cookieName, ...cookieOptions });
+
+    if (sessionId) {
+      redirect(
+        workos.userManagement.getLogoutUrl({ sessionId, returnTo })
+      );
+    } else {
+      redirect(returnTo ?? '/');
+    }
+  }
+}
+```
+
+### Session revocation
+
+WorkOS can revoke sessions server-side if:
+- User changes their password
+- Admin terminates the session
+- Session is compromised
+- Organization requires re-authentication
+
+When a revoked refresh token is used, the middleware will detect the error and delete the local session.
+
+## Custom session storage
+
+For advanced use cases, you can manually save sessions after custom authentication flows:
+
+```typescript
+import { saveSession } from '@workos-inc/authkit-nextjs';
+import { workos } from './workos';
+
+export async function POST(request: NextRequest) {
+  const { code } = await request.json();
+  
+  // Custom authentication (e.g., email verification)
+  const authResponse = await workos.userManagement
+    .authenticateWithEmailVerification({
+      clientId: process.env.WORKOS_CLIENT_ID!,
+      code,
+    });
+  
+  // Save the session
+  await saveSession(authResponse, request);
+  
+  return NextResponse.json({ success: true });
+}
+```
+
+<Warning>
+Manual session management bypasses standard security checks. Only use this for authenticated flows that don't go through the standard callback handler.
+</Warning>
+
+## Session cookie configuration
+
+Cookie behavior is controlled by environment variables:
+
+```bash .env.local
+# Cookie name (default: wos-session)
+WORKOS_COOKIE_NAME=my-session
+
+# Encryption password (required, min 32 characters)
+WORKOS_COOKIE_PASSWORD=complex-secret-at-least-32-characters-long
+
+# Max age in seconds (default: 400 days)
+WORKOS_COOKIE_MAX_AGE=34560000
+
+# Domain for cookie (default: current domain)
+WORKOS_COOKIE_DOMAIN=.example.com
+
+# SameSite setting (default: lax)
+WORKOS_COOKIE_SAMESITE=strict
+```
+
+### Cookie security
+
+Cookies are configured with security-first defaults from `cookie.ts:82-93`:
+
+```typescript
+return {
+  path: '/',
+  httpOnly: true,           // No JavaScript access
+  secure: isHttps,          // HTTPS only (except localhost)
+  sameSite: 'lax',          // CSRF protection
+  maxAge: 60 * 60 * 24 * 400, // 400 days (Chrome maximum)
+  domain: WORKOS_COOKIE_DOMAIN || undefined,
+};
+```
+
+<Info>
+The long cookie expiry (400 days) is safe because access tokens expire quickly. The refresh token controls the actual session lifetime.
+</Info>
+
+## Debugging sessions
+
+Enable debug mode to see session operations in your server logs:
+
+```typescript middleware.ts
+export default authkitMiddleware({
+  debug: true,
+});
+```
+
+This logs:
+- Session refresh attempts
+- Token expiration details
+- Refresh success/failure
+- Session validation results
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Middleware" icon="shield" href="/core-concepts/middleware">
+    Learn how middleware protects routes and manages sessions
+  </Card>
+  <Card title="Authentication flow" icon="arrow-right-arrow-left" href="/core-concepts/authentication-flow">
+    Understand the complete authentication process
+  </Card>
+</CardGroup>
